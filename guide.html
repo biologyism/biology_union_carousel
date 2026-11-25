@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>راهنمای ساده ربات کاروسل اسلایدی</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Tahoma, Arial, sans-serif; background:#f0f4f8; color:#1a202c; line-height:1.9; padding:20px 14px 50px; }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  .hero { background: linear-gradient(135deg,#229ED9,#0088cc); color:#fff; border-radius:18px; padding:30px 22px; text-align:center; margin-bottom:22px; box-shadow:0 8px 24px rgba(0,136,204,.25); }
+  .hero .emoji { font-size:52px; display:block; margin-bottom:8px; }
+  .hero h1 { font-size:26px; margin-bottom:8px; }
+  .hero p { font-size:15px; opacity:.95; }
+  .overview { background:#fff; border-radius:14px; padding:18px 20px; margin-bottom:22px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
+  .overview h2 { font-size:17px; margin-bottom:12px; color:#0088cc; }
+  .steps-mini { display:flex; flex-wrap:wrap; gap:8px; }
+  .steps-mini span { background:#e8f4fc; color:#0077b6; border-radius:999px; padding:5px 13px; font-size:13px; font-weight:bold; }
+  .card { background:#fff; border-radius:16px; padding:24px 22px; margin-bottom:20px; box-shadow:0 2px 10px rgba(0,0,0,.06); border-top:5px solid #229ED9; }
+  .card.green{border-top-color:#22c55e;} .card.orange{border-top-color:#f59e0b;}
+  .card.purple{border-top-color:#8b5cf6;} .card.pink{border-top-color:#ec4899;}
+  .card-head { display:flex; align-items:center; gap:13px; margin-bottom:16px; }
+  .num { flex-shrink:0; width:46px; height:46px; border-radius:50%; background:#229ED9; color:#fff; font-size:22px; font-weight:bold; display:flex; align-items:center; justify-content:center; }
+  .green .num{background:#22c55e;} .orange .num{background:#f59e0b;} .purple .num{background:#8b5cf6;} .pink .num{background:#ec4899;}
+  .card-head h2 { font-size:20px; }
+  .card p { font-size:15px; margin-bottom:10px; }
+  .card ul, .card ol { padding-right:22px; font-size:15px; margin-bottom:10px; }
+  .card li { margin-bottom:7px; }
+  .tip { background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:11px 14px; font-size:14px; margin:12px 0; }
+  .tip b { color:#92400e; }
+  .warn { background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:11px 14px; font-size:14px; margin:12px 0; }
+  .warn b { color:#991b1b; }
+  .ok { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:11px 14px; font-size:14px; margin:12px 0; }
+  .ok b { color:#166534; }
+  code, .ltr { direction:ltr; display:inline-block; background:#eef2f7; border-radius:6px; padding:1px 8px; font-family:Consolas,monospace; font-size:13.5px; color:#0f4c75; }
+  pre { direction:ltr; text-align:left; background:#1e293b; color:#e2e8f0; border-radius:10px; padding:14px 16px; font-size:13px; overflow-x:auto; margin:10px 0; line-height:1.7; }
+  pre code { background:none; color:inherit; padding:0; }
+  .checklist { list-style:none; padding-right:0 !important; }
+  .checklist li { background:#f8fafc; border-radius:10px; padding:10px 14px; margin-bottom:8px; }
+  .faq { margin-bottom:10px; }
+  .faq summary { cursor:pointer; font-weight:bold; font-size:15px; background:#f1f5f9; border-radius:10px; padding:11px 14px; }
+  .faq p { padding:10px 14px; font-size:14px; color:#475569; }
+  .footer { text-align:center; color:#94a3b8; font-size:13px; margin-top:26px; }
+
+  /* ---- نمای شبیه‌سازی کاروسل ---- */
+  .mock { background:#17212b; border-radius:14px; padding:16px; margin:14px 0; }
+  .mock .slide {
+    position:relative; background:linear-gradient(160deg,#e8f1f5,#cfe3ec); border-radius:10px 10px 0 0;
+    height:190px; display:flex; align-items:center; justify-content:center; color:#4a6b7c; font-size:15px; font-weight:bold;
+  }
+  .mock .arrow { position:absolute; top:50%; transform:translateY(-50%); width:34px; height:34px; border-radius:50%;
+    background:rgba(0,0,0,.45); color:#fff; display:flex; align-items:center; justify-content:center; font-size:15px; }
+  .mock .arrow.r { right:8px; } .mock .arrow.l { left:8px; }
+  .mock .kb { background:#17212b; padding:6px 0 0; }
+  .mock .krow { display:flex; gap:4px; margin-bottom:4px; }
+  .mock .kbtn { flex:1; background:#232e3c; color:#e3e9ef; border-radius:6px; padding:7px 2px; text-align:center; font-size:12px; }
+  .mock .kbtn.dots { background:transparent; color:#8ea3b8; font-size:13px; }
+  .mock .cap { color:#c8d6e2; font-size:13px; padding:6px 4px 2px; }
+  .mock .meta { color:#7b8fa3; font-size:11px; text-align:left; direction:ltr; padding:4px 4px 0; }
+
+  @media (max-width:560px) { .hero h1{font-size:21px;} .card{padding:20px 16px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="emoji">🎠</span>
+    <h1>راهنمای ربات کاروسل اسلایدی</h1>
+    <p>هر کاروسل = یک پیام که با ◀ ▶ عکسش عوض می‌شه</p>
+  </div>
+
+  <!-- نمای کاروسل -->
+  <div class="card">
+    <div class="card-head"><div class="num">🎯</div><h2>ربات چه چیزی می‌سازه؟</h2></div>
+    <p>یک <b>پیام واحد</b> — نه آلبوم. با دکمه‌های ◀️ و ▶️ اسلاید عوض می‌شه و نقطه‌های پایین نشون می‌دن اسلاید چندمی:</p>
+    <div class="mock">
+      <div class="slide">
+        عکس اسلاید ۱
+        <div class="arrow l">◀</div>
+        <div class="arrow r">▶</div>
+      </div>
+      <div class="cap">✨ متن کپشن این اسلاید</div>
+      <div class="kb">
+        <div class="krow">
+          <div class="kbtn">◀️</div>
+          <div class="kbtn">۱ از ۴</div>
+          <div class="kbtn">▶️</div>
+        </div>
+        <div class="krow">
+          <div class="kbtn dots">●</div>
+          <div class="kbtn dots">○</div>
+          <div class="kbtn dots">○</div>
+          <div class="kbtn dots">○</div>
+        </div>
+        <div class="krow">
+          <div class="kbtn">✏️ کپشن این اسلاید</div>
+          <div class="kbtn">📤 انتشار</div>
+        </div>
+      </div>
+      <div class="meta">11:00 PM</div>
+    </div>
+    <div class="ok">✅ همه چیز توی <b>همون یک پیام</b> اتفاق می‌افته — پیام جدیدی ساخته نمی‌شه، پس گروه شلوغ نمی‌شه.</div>
+  </div>
+
+  <!-- آپدیت -->
+  <div class="card pink">
+    <div class="card-head"><div class="num">⚡</div><h2>قدم صفر: آپدیت ربات (فقط ۴ کلیک)</h2></div>
+    <p>ربات قبلی آلبوم می‌ساخت. نسخه جدید رو باید جایگزین کنی:</p>
+    <ol>
+      <li>فایل <b>bot.py</b> رو از همین‌جا <b>دانلود</b> کن</li>
+      <li>برو به ریپوی گیت‌هابت: <code>biologyism/biology_union_carousel</code></li>
+      <li>روی <b>Add file ← Upload files</b> بزن</li>
+      <li>فایل <b>bot.py</b> جدید رو بکش و بنداز داخل صفحه (فایل قبلی خودکار جایگزین می‌شه)</li>
+      <li>دکمه سبز <b>Commit changes</b> رو بزن</li>
+    </ol>
+    <div class="tip">💡 بعد از Commit، ربات <b>خودش</b> با کد جدید روشن می‌شه (چون ورک‌فلو روی هر تغییر اجرا می‌شه). فقط ۱ دقیقه صبر کن.</div>
+    <div class="warn">⚠️ فایل رو <b>bot.py</b> با همون اسم آپلود کن، وگرنه ورک‌فلو پیداش نمی‌کنه.</div>
+  </div>
+
+  <!-- استفاده -->
+  <div class="card orange">
+    <div class="card-head"><div class="num">▶</div><h2>چطور استفاده کنم؟</h2></div>
+    <ol>
+      <li>توی چت با ربات (یا توی گروه) بنویس: <code>/start</code></li>
+      <li>عکس‌هاش رو <b>یکی‌یکی</b> بفرست (تا ۱۰ تا) 📸</li>
+      <li>روی <b>«🎬 ساخت کاروسل»</b> بزن</li>
+      <li>حالا با <b>◀️ ▶️</b> بین اسلایدها بچرخ 🎉</li>
+    </ol>
+    <p>بعد از ساخت، این دکمه‌ها رو داری:</p>
+    <ul>
+      <li><b>✏️ کپشن این اسلاید</b> — متن روی همین عکس رو عوض می‌کنه</li>
+      <li><b>➕ عکس</b> — اسلاید جدید اضافه می‌کنه</li>
+      <li><b>➖ حذف این اسلاید</b> — اسلایدی که روش هستی رو برمی‌داره</li>
+      <li><b>📤 انتشار</b> — کاروسل رو به کانال/گروه مقصد می‌فرسته، <b>بدون اینکه نامت دیده بشه</b></li>
+      <li><b>🗑 پاک کردن</b> — کل کاروسل رو حذف می‌کنه</li>
+    </ul>
+  </div>
+
+  <!-- گروه -->
+  <div class="card purple">
+    <div class="card-head"><div class="num">👥</div><h2>توی گروه — همه بتونن استفاده کنن</h2></div>
+    <p>۳ کار لازمه:</p>
+    <p><b>الف) خاموش کردن Group Privacy:</b></p>
+    <ol>
+      <li>برو به <a href="https://t.me/BotFather" target="_blank">@BotFather</a></li>
+      <li><code>/mybots</code> → رباتت رو انتخاب کن</li>
+      <li><b>Bot Settings ← Group Privacy ← Turn off</b></li>
+    </ol>
+    <div class="warn">⚠️ اگه این کار رو نکنی، ربات عکس‌هایی که بقیه توی گروه می‌فرستن رو نمی‌بینه.</div>
+    <p><b>ب) اضافه کردن ربات به گروه:</b></p>
+    <ol>
+      <li>تنظیمات گروه ← اعضا ← افزودن عضو ← یوزرنیم ربات</li>
+      <li>ربات رو <b>ادمین</b> کن</li>
+    </ol>
+    <p><b>ج) تست:</b> توی گروه <code>/start</code> بزن و چند عکس بفرست.</p>
+    <div class="ok">👥 هر عضو گروه <code>/start</code> می‌زنه و کاروسل خودش رو می‌سازه. همه کاروسل‌های ساخته‌شده رو می‌تونن ورق بزنن.</div>
+  </div>
+
+  <!-- انتشار -->
+  <div class="card green">
+    <div class="card-head"><div class="num">📤</div><h2>انتشار در کانال (بدون نام من)</h2></div>
+    <ol>
+      <li>وقتی کاروسل آماده شد، دکمه <b>«📤 انتشار»</b> رو بزن</li>
+      <li>یوزرنیم کانال رو بفرست: <code>@mychannel</code><br>یا آیدی عددی: <code>-1001234567890</code></li>
+      <li>تمام! کاروسل توی کانال می‌ره و مردم با ◀ ▶ ورقش می‌زنن</li>
+    </ol>
+    <div class="warn">⚠️ ربات باید در کانال/گروه مقصد <b>ادمین</b> باشه، وگرنه ارسال ناموفق می‌شه.</div>
+    <div class="tip">💡 فقط <b>یوزرنیم کانال‌های عمومی</b> کار می‌کنه. برای کانال خصوصی باید آیدی عددی (<code>-100...</code>) بدی.</div>
+  </div>
+
+  <!-- چک‌لیست -->
+  <div class="card">
+    <div class="card-head"><div class="num">☑</div><h2>چک‌لیست</h2></div>
+    <ul class="checklist">
+      <li>☐ فایل <b>bot.py</b> جدید رو آپلود و Commit کردم</li>
+      <li>☐ توی Actions علامت سبز ✅ هست</li>
+      <li>☐ توی چت خصوصی <code>/start</code> + چند عکس + «ساخت کاروسل» تست کردم</li>
+      <li>☐ Group Privacy خاموشه</li>
+      <li>☐ ربات توی گروه ادمین شده و جواب می‌ده</li>
+      <li>☐ انتشار در کانال تست شد</li>
+    </ul>
+  </div>
+
+  <!-- سوالات -->
+  <div class="card orange">
+    <div class="card-head"><div class="num">؟</div><h2>مشکلات رایج</h2></div>
+    <details class="faq">
+      <summary>دکمه‌ها کار نمی‌کنن / می‌گه «کاروسل منقضی شده»</summary>
+      <p>ربات روی گیت‌هاب هر چند ساعت یک‌بار ری‌استارت می‌شه و کاروسل‌های قبلی از حافظه پاک می‌شن. کافیه عکس‌ها رو دوباره بفرستی و یکی جدید بسازی. خود عکس‌ها و کپشن‌ها همیشه توی تلگرام می‌مونن — پیام ساخته‌شده پاک نمی‌شه.</p>
+    </details>
+    <details class="faq">
+      <summary>عکس عوض می‌شه ولی پیام جدید هم میاد</summary>
+      <p>این‌طبیعیه: پیام‌های «✅ ذخیره شد» جدا فرستاده می‌شن. فقط <b>خودِ کاروسل</b> در یک پیام می‌مونه.</p>
+    </details>
+    <details class="faq">
+      <summary>کپشن نمی‌شینه</summary>
+      <p>مطمئن شو بعد از زدن «✏️ کپشن این اسلاید» <b>متن رو به‌صورت پیام</b> فرستادی. کپشن هر اسلاید جداست.</p>
+    </details>
+    <details class="faq">
+      <summary>توی گروه جواب نمی‌ده</summary>
+      <p>۹۰٪ مواقع Group Privacy خاموش نشده. بعد از خاموش کردن، ربات رو از گروه حذف و دوباره اضافه کن.</p>
+    </details>
+    <details class="faq">
+      <summary>Actions قرمز شد ❌</summary>
+      <p>توکن اشتباهه. Settings ← Secrets and variables ← Actions ← <code>BOT_TOKEN</code> رو درست کن.</p>
+    </details>
+  </div>
+
+  <p class="footer">🎠 ربات کاروسل اسلایدی — موفق باشی!</p>
+</div>
+</body>
+</html>
