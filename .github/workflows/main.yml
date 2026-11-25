@@ -1,0 +1,30 @@
+name: Run Carousel Bot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */5 * * *"
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          FORWARD_CHAT_ID: ${{ secrets.FORWARD_CHAT_ID }}
+          ALLOWED_USER_ID: ${{ secrets.ALLOWED_USER_ID }}
+        run: python bot.py
