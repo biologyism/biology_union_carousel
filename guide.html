@@ -55,6 +55,9 @@
   .mock .krow { display:flex; gap:4px; margin-bottom:4px; }
   .mock .kbtn { flex:1; background:#232e3c; color:#e3e9ef; border-radius:6px; padding:7px 2px; text-align:center; font-size:12px; }
   .mock .kbtn.dots { background:transparent; color:#8ea3b8; font-size:13px; }
+  .mock .dots { position:absolute; bottom:9px; left:0; right:0; display:flex; justify-content:center; gap:7px; }
+  .mock .dot { width:7px; height:7px; border-radius:50%; background:rgba(0,0,0,.18); display:block; }
+  .mock .dot.on { background:rgba(0,0,0,.8); }
   .mock .cap { color:#c8d6e2; font-size:13px; padding:6px 4px 2px; }
   .mock .meta { color:#7b8fa3; font-size:11px; text-align:left; direction:ltr; padding:4px 4px 0; }
 
@@ -73,49 +76,79 @@
   <!-- نمای کاروسل -->
   <div class="card">
     <div class="card-head"><div class="num">🎯</div><h2>ربات چه چیزی می‌سازه؟</h2></div>
-    <p>یک <b>پیام واحد</b> — نه آلبوم. با دکمه‌های ◀️ و ▶️ اسلاید عوض می‌شه و نقطه‌های پایین نشون می‌دن اسلاید چندمی:</p>
+    <p>یک <b>پیام واحد</b>. فلش‌های ◀ ▶ روی <b>خود لبه‌های عکس</b> و نقطه‌ها <b>پایین عکس</b> — دقیقاً مثل نمونه‌ای که فرستادی:</p>
     <div class="mock">
       <div class="slide">
-        عکس اسلاید ۱
+        عکس اسلاید ۲
         <div class="arrow l">◀</div>
         <div class="arrow r">▶</div>
+        <div class="dots">
+          <span class="dot"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span>
+        </div>
       </div>
-      <div class="cap">✨ متن کپشن این اسلاید</div>
       <div class="kb">
         <div class="krow">
           <div class="kbtn">◀️</div>
-          <div class="kbtn">۱ از ۴</div>
+          <div class="kbtn" style="flex:.7">⚙️</div>
           <div class="kbtn">▶️</div>
-        </div>
-        <div class="krow">
-          <div class="kbtn dots">●</div>
-          <div class="kbtn dots">○</div>
-          <div class="kbtn dots">○</div>
-          <div class="kbtn dots">○</div>
-        </div>
-        <div class="krow">
-          <div class="kbtn">✏️ کپشن این اسلاید</div>
-          <div class="kbtn">📤 انتشار</div>
         </div>
       </div>
       <div class="meta">11:00 PM</div>
     </div>
-    <div class="ok">✅ همه چیز توی <b>همون یک پیام</b> اتفاق می‌افته — پیام جدیدی ساخته نمی‌شه، پس گروه شلوغ نمی‌شه.</div>
+    <div class="ok">✅ زیر عکس فقط یک ردیف باریک دکمه هست. بقیه کارها (کپشن، افزودن عکس، انتشار) داخل دکمه <b>⚙️</b> پنهان شده.</div>
+    <div class="tip">💡 چرا فلش‌ها هم روی عکس هستن هم زیرش؟ چون تلگرام اجازه نمی‌ده دکمه <b>روی</b> عکس باشه. فلش‌های روی عکس تصویری‌اند (برای زیبایی) و فلش‌های زیرش دکمه‌های واقعی‌اند.</div>
+  </div>
+
+  <!-- همیشگی -->
+  <div class="card green">
+    <div class="card-head"><div class="num">♾</div><h2>کاروسل‌ها دیگه منقضی نمی‌شن</h2></div>
+    <p>قبلاً با هر ری‌استارت ربات، دکمه‌های کاروسل‌های قدیمی از کار می‌افتادن. حالا ربات لیست کاروسل‌ها رو توی فایل
+      <code>state.json</code> نگه می‌داره و <b>هر ۹۰ ثانیه</b> اون رو توی همون ریپو ذخیره می‌کنه.</p>
+    <ul>
+      <li>✅ کاروسل هفته پیش هم امروز با ◀ ▶ کار می‌کنه</li>
+      <li>✅ اگه ربات قطع و وصل بشه، چیزی از دست نمی‌ره</li>
+      <li>✅ خودکار انجام می‌شه — کاری لازم نیست بکنی</li>
+    </ul>
+    <div class="tip">💡 توی ریپو کامیت‌هایی با پیام <code>chore: state [skip ci]</code> می‌بینی — این‌ها همون ذخیره‌های خودکارن. کاملاً عادیه.</div>
+    <div class="warn">⚠️ برای فعال شدنش کافیه کل پوشه رو یک‌جا آپلود کنی — کارت بعدی.</div>
   </div>
 
   <!-- آپدیت -->
   <div class="card pink">
-    <div class="card-head"><div class="num">⚡</div><h2>قدم صفر: آپدیت ربات (فقط ۴ کلیک)</h2></div>
-    <p>ربات قبلی آلبوم می‌ساخت. نسخه جدید رو باید جایگزین کنی:</p>
+    <div class="card-head"><div class="num">📦</div><h2>قدم ۱: آپلود یک‌جا (کل پوشه)</h2></div>
+    <p>لازم نیست فایل‌به‌فایل کاری کنی. یک zip داری که <b>همه‌چیز</b> توش هست:</p>
     <ol>
-      <li>فایل <b>bot.py</b> رو از همین‌جا <b>دانلود</b> کن</li>
-      <li>برو به ریپوی گیت‌هابت: <code>biologyism/biology_union_carousel</code></li>
-      <li>روی <b>Add file ← Upload files</b> بزن</li>
-      <li>فایل <b>bot.py</b> جدید رو بکش و بنداز داخل صفحه (فایل قبلی خودکار جایگزین می‌شه)</li>
-      <li>دکمه سبز <b>Commit changes</b> رو بزن</li>
+      <li>فایل zip رو دانلود و <b>Extract</b> کن</li>
+      <li>پوشه رو باز کن و <b>Ctrl + A</b> بزن (همه انتخاب بشن)</li>
+      <li>برو به ریپو: <code>biologyism/biology_union_carousel</code></li>
+      <li><b>Add file ← Upload files</b></li>
+      <li>همه فایل‌ها رو بکش و بنداز توی صفحه</li>
+      <li><b>Commit changes</b></li>
     </ol>
-    <div class="tip">💡 بعد از Commit، ربات <b>خودش</b> با کد جدید روشن می‌شه (چون ورک‌فلو روی هر تغییر اجرا می‌شه). فقط ۱ دقیقه صبر کن.</div>
-    <div class="warn">⚠️ فایل رو <b>bot.py</b> با همون اسم آپلود کن، وگرنه ورک‌فلو پیداش نمی‌کنه.</div>
+    <div class="ok">✅ با همین یک آپلود، هم نسخه‌ی اسلایدی جدید نصب می‌شه، هم ذخیره‌سازی دائمی، هم ورک‌فلوی اجرای خودکار.</div>
+    <div class="warn">⚠️ پوشه <code>.github</code> هم باید آپلود بشه، وگرنه ربات اجرا نمی‌شه. اگه ویندوز مخفیش کرده: <b>View ← Hidden items</b>.</div>
+    <div class="tip">💡 فایل‌های هم‌نام (مثل <code>bot.py</code> و <code>main.yml</code>) خودکار جایگزین می‌شن — لازم نیست اول پاکشون کنی.</div>
+  </div>
+
+  <!-- تنظیمات گیت‌هاب -->
+  <div class="card purple">
+    <div class="card-head"><div class="num">🔑</div><h2>قدم ۲: دو تنظیم در گیت‌هاب</h2></div>
+
+    <p><b>الف) اجازه‌ی نوشتن</b> — بدون این، کاروسل‌ها ذخیره نمی‌شن:</p>
+    <ol>
+      <li><b>Settings</b> → <b>Actions</b> → <b>General</b></li>
+      <li>برو پایین صفحه تا <b>Workflow permissions</b></li>
+      <li><b>Read and write permissions</b> رو انتخاب کن</li>
+      <li><b>Save</b></li>
+    </ol>
+
+    <p style="margin-top:16px"><b>ب) توکن ربات</b> (اگه قبلاً ساختی، رد شو):</p>
+    <ol>
+      <li><b>Settings</b> → <b>Secrets and variables</b> → <b>Actions</b></li>
+      <li><b>New repository secret</b></li>
+      <li>Name: <code>BOT_TOKEN</code> — Secret: توکن BotFather</li>
+    </ol>
+    <div class="warn">⚠️ <code>ALLOWED_USER_ID</code> رو خالی بذار تا همه اعضای گروه بتونن استفاده کنن.</div>
   </div>
 
   <!-- استفاده -->
@@ -127,13 +160,15 @@
       <li>روی <b>«🎬 ساخت کاروسل»</b> بزن</li>
       <li>حالا با <b>◀️ ▶️</b> بین اسلایدها بچرخ 🎉</li>
     </ol>
-    <p>بعد از ساخت، این دکمه‌ها رو داری:</p>
+    <p>بعد از ساخت، این‌ها رو داری:</p>
     <ul>
-      <li><b>✏️ کپشن این اسلاید</b> — متن روی همین عکس رو عوض می‌کنه</li>
-      <li><b>➕ عکس</b> — اسلاید جدید اضافه می‌کنه</li>
-      <li><b>➖ حذف این اسلاید</b> — اسلایدی که روش هستی رو برمی‌داره</li>
-      <li><b>📤 انتشار</b> — کاروسل رو به کانال/گروه مقصد می‌فرسته، <b>بدون اینکه نامت دیده بشه</b></li>
-      <li><b>🗑 پاک کردن</b> — کل کاروسل رو حذف می‌کنه</li>
+      <li><b>◀️ ▶️</b> — ورق زدن اسلایدها (نقطه‌های روی عکس نشون می‌دن کجایی)</li>
+      <li><b>⚙️</b> — منوی گزینه‌ها، شامل:</li>
+      <li style="list-style:none;margin-right:18px">✏️ <b>کپشن این اسلاید</b> — متن روی همین عکس</li>
+      <li style="list-style:none;margin-right:18px">➕ <b>عکس</b> — اسلاید جدید</li>
+      <li style="list-style:none;margin-right:18px">➖ <b>حذف این اسلاید</b></li>
+      <li style="list-style:none;margin-right:18px">📤 <b>انتشار</b> — فرستادن به کانال/گروه <b>بدون دیده شدن نامت</b></li>
+      <li style="list-style:none;margin-right:18px">🗑 <b>پاک کردن</b> — حذف کل کاروسل</li>
     </ul>
   </div>
 
@@ -173,7 +208,9 @@
   <div class="card">
     <div class="card-head"><div class="num">☑</div><h2>چک‌لیست</h2></div>
     <ul class="checklist">
-      <li>☐ فایل <b>bot.py</b> جدید رو آپلود و Commit کردم</li>
+      <li>☐ کل پوشه رو یک‌جا آپلود و Commit کردم (شامل <code>.github</code>)</li>
+      <li>☐ در Settings، «Read and write permissions» رو فعال کردم</li>
+      <li>☐ توی ریپو فایل <code>state.json</code> ساخته شده (یعنی ذخیره‌سازی کار می‌کنه)</li>
       <li>☐ توی Actions علامت سبز ✅ هست</li>
       <li>☐ توی چت خصوصی <code>/start</code> + چند عکس + «ساخت کاروسل» تست کردم</li>
       <li>☐ Group Privacy خاموشه</li>
@@ -187,7 +224,7 @@
     <div class="card-head"><div class="num">؟</div><h2>مشکلات رایج</h2></div>
     <details class="faq">
       <summary>دکمه‌ها کار نمی‌کنن / می‌گه «کاروسل منقضی شده»</summary>
-      <p>ربات روی گیت‌هاب هر چند ساعت یک‌بار ری‌استارت می‌شه و کاروسل‌های قبلی از حافظه پاک می‌شن. کافیه عکس‌ها رو دوباره بفرستی و یکی جدید بسازی. خود عکس‌ها و کپشن‌ها همیشه توی تلگرام می‌مونن — پیام ساخته‌شده پاک نمی‌شه.</p>
+      <p>با نسخه‌ی جدید دیگه نباید پیش بیاد، چون کاروسل‌ها توی <code>state.json</code> ذخیره می‌شن. اگه باز هم دیدی، یعنی پوشه <code>.github</code> آپلود نشده یا <b>main.yml</b> قدیمیه. در بدترین حالت، عکس‌ها رو دوباره بفرست و یکی جدید بساز — پیام قبلی توی تلگرام پاک نمی‌شه.</p>
     </details>
     <details class="faq">
       <summary>عکس عوض می‌شه ولی پیام جدید هم میاد</summary>

@@ -7,4 +7,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py .
 
+# کاروسل‌ها اینجا ذخیره می‌شوند (والیوم در docker-compose)
+RUN mkdir -p /app/data
+ENV STATE_FILE=/app/data/state.json
+
 CMD ["python", "bot.py"]

@@ -5,3 +5,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      STATE_FILE: /app/data/state.json
+    volumes:
+      - botdata:/app/data
+
+volumes:
+  botdata:

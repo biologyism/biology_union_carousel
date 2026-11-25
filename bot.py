@@ -22,8 +22,15 @@
     BOT_TOKEN=xxxx python bot.py
 """
 
+import asyncio
+import io
+import json
 import os
 import logging
+import subprocess
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFilter
 
 from dotenv import load_dotenv
 from telegram import (
@@ -49,6 +56,16 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 FORWARD_CHAT_ID = os.getenv("FORWARD_CHAT_ID", "").strip()
 # فقط این کاربر اجازه ساخت دارد (اختیاری) — برای گروه خالی بگذار
 ALLOWED_USER_ID = os.getenv("ALLOWED_USER_ID", "").strip()
+
+# ---------------- ذخیره‌سازی دائمی ----------------
+# کاروسل‌ها در یک فایل JSON نگه داشته می‌شوند تا بعد از ری‌استارت هم زنده بمانند.
+STATE_FILE = os.getenv("STATE_FILE", "state.json").strip() or "state.json"
+# file = فقط روی دیسک | git = روی دیسک + کامیت به ریپو (برای GitHub Actions)
+STATE_PERSIST = os.getenv("STATE_PERSIST", "file").strip().lower()
+# فاصله‌ی بررسی و کامیت خودکار (ثانیه)
+PERSIST_INTERVAL = int(os.getenv("PERSIST_INTERVAL", "90"))
+# سقف تعداد کاروسل‌های نگهداری‌شده (قدیمی‌ترها حذف می‌شوند)
+MAX_STORED = 500
 
 if not BOT_TOKEN:
     raise SystemExit("❌ BOT_TOKEN تنظیم نشده! فایل .env بسازید یا متغیر محیطی BOT_TOKEN را ست کنید.")
@@ -81,6 +98,102 @@ async def ack(query, text: str = None, alert: bool = False):
 
 def store(context: ContextTypes.DEFAULT_TYPE) -> dict:
     return context.bot_data.setdefault("carousels", {})
+
+
+# ------------------------------------------------ ذخیره/بازیابی روی دیسک
+
+def load_state(context: ContextTypes.DEFAULT_TYPE):
+    path = Path(STATE_FILE)
+    if not path.exists():
+        logger.info("state file not found — starting fresh (%s)", STATE_FILE)
+        return
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("state file unreadable, starting fresh: %s", e)
+        return
+    carousels = {}
+    for k, v in (raw.get("carousels") or {}).items():
+        try:
+            carousels[int(k)] = v
+        except (TypeError, ValueError):
+            continue
+    context.bot_data["carousels"] = carousels
+    context.bot_data["next_cid"] = int(raw.get("next_cid") or 1)
+    logger.info("✅ %d کاروسل از فایل state بازیابی شد", len(carousels))
+
+
+def save_state(context: ContextTypes.DEFAULT_TYPE):
+    """نوشتن اتمیک روی دیسک. هر تغییری در کاروسل‌ها این را صدا می‌زند."""
+    d = store(context)
+    if len(d) > MAX_STORED:
+        for k in sorted(d)[: len(d) - MAX_STORED]:
+            d.pop(k, None)
+    payload = {
+        "next_cid": context.bot_data.get("next_cid", 1),
+        "carousels": {str(k): v for k, v in d.items()},
+    }
+    try:
+        path = Path(STATE_FILE)
+        if path.parent and str(path.parent) not in ("", "."):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+    except Exception as e:
+        logger.warning("save_state failed: %s", e)
+
+
+def _git_push_state() -> bool:
+    """کامیت و پوش state.json به ریپو (فقط حالت STATE_PERSIST=git)."""
+    def run(*args, timeout=60):
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+
+    if not Path(STATE_FILE).exists():
+        return False
+    try:
+        run("git", "add", STATE_FILE)
+        if run("git", "diff", "--cached", "--quiet").returncode == 0:
+            return False  # تغییری نیست
+        run(
+            "git", "-c", "user.name=carousel-bot",
+            "-c", "user.email=carousel-bot@users.noreply.github.com",
+            "commit", "-m", "chore: state [skip ci]",
+        )
+        push = run("git", "push", "origin", "HEAD:main", timeout=90)
+        if push.returncode != 0:
+            # احتمالاً اجرای دیگری زودتر پوش کرده — یک‌بار ری‌بیس و تلاش دوباره
+            logger.info("git push retry after rebase...")
+            run("git", "pull", "--rebase", "origin", "main", timeout=90)
+            push = run("git", "push", "origin", "HEAD:main", timeout=90)
+        if push.returncode != 0:
+            logger.warning("git push failed: %s", (push.stderr or "").strip()[:300])
+            return False
+        logger.info("💾 state در ریپو ذخیره شد")
+        return True
+    except Exception as e:
+        logger.warning("git persistence failed: %s", e)
+        return False
+
+
+async def persist_loop(app: Application):
+    """هر چند ثانیه اگر تغییری بوده، state را در ریپو کامیت می‌کند."""
+    while True:
+        await asyncio.sleep(max(20, PERSIST_INTERVAL))
+        if STATE_PERSIST == "git":
+            try:
+                await asyncio.to_thread(_git_push_state)
+            except Exception as e:
+                logger.warning("persist loop error: %s", e)
+
+
+async def post_init(app: Application):
+    load_state(app)
+    if STATE_PERSIST == "git":
+        app.create_task(persist_loop(app))
+        logger.info("💾 ذخیره‌سازی دائمی روی گیت فعال است")
+    else:
+        logger.info("💾 ذخیره‌سازی دائمی روی فایل: %s", STATE_FILE)
 
 
 def create_carousel(context, photos, captions) -> int:
@@ -136,33 +249,116 @@ def collect_kb(s: dict) -> InlineKeyboardMarkup:
 
 
 def carousel_kb(cid: int, idx: int, n: int) -> InlineKeyboardMarkup:
-    rows = []
-
-    nav = []
+    """فقط یک ردیف باریک — فلش‌ها و نقطه‌ها روی خود عکس کشیده شده‌اند."""
+    row = []
     if n > 1:
-        nav.append(InlineKeyboardButton("◀️", callback_data=f"c|{cid}|p"))
-    nav.append(InlineKeyboardButton(f"{idx + 1} از {n}", callback_data=f"c|{cid}|info"))
+        row.append(InlineKeyboardButton("◀️", callback_data=f"c|{cid}|p"))
+    row.append(InlineKeyboardButton("⚙️", callback_data=f"c|{cid}|menu"))
     if n > 1:
-        nav.append(InlineKeyboardButton("▶️", callback_data=f"c|{cid}|n"))
-    rows.append(nav)
+        row.append(InlineKeyboardButton("▶️", callback_data=f"c|{cid}|n"))
+    return InlineKeyboardMarkup([row])
 
-    # نقطه‌های نشانگر (تا ۵ اسلاید)
-    if 2 <= n <= 5:
-        rows.append([
-            InlineKeyboardButton("●" if i == idx else "○", callback_data=f"c|{cid}|j{i}")
-            for i in range(n)
-        ])
 
-    rows.append([
-        InlineKeyboardButton("✏️ کپشن این اسلاید", callback_data=f"c|{cid}|cap"),
-        InlineKeyboardButton("📤 انتشار", callback_data=f"c|{cid}|pub"),
+def menu_kb(cid: int, idx: int, n: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"✏️ کپشن اسلاید {idx + 1}", callback_data=f"c|{cid}|cap")],
+        [
+            InlineKeyboardButton("➕ عکس", callback_data=f"c|{cid}|add"),
+            InlineKeyboardButton("➖ حذف این اسلاید", callback_data=f"c|{cid}|rem"),
+        ],
+        [InlineKeyboardButton("📤 انتشار در کانال / گروه", callback_data=f"c|{cid}|pub")],
+        [InlineKeyboardButton("🗑 پاک کردن کاروسل", callback_data=f"c|{cid}|del")],
+        [InlineKeyboardButton("✖️ بستن", callback_data=f"c|{cid}|close")],
     ])
-    rows.append([
-        InlineKeyboardButton("➕ عکس", callback_data=f"c|{cid}|add"),
-        InlineKeyboardButton("➖ حذف این اسلاید", callback_data=f"c|{cid}|rem"),
-        InlineKeyboardButton("🗑 پاک کردن", callback_data=f"c|{cid}|del"),
-    ])
-    return InlineKeyboardMarkup(rows)
+
+
+# ---------------------------------------------------------------- پردازش عکس
+
+# کش بایت‌های عکس اصلی: file_id → bytes
+_RAW_CACHE: dict = {}
+# کش عکس آماده‌شده: "file_id|idx|n" → file_id جدید تلگرام
+RENDER_CACHE_KEY = "render_cache"
+
+
+async def fetch_raw(context, file_id: str) -> bytes:
+    if file_id in _RAW_CACHE:
+        return _RAW_CACHE[file_id]
+    f = await context.bot.get_file(file_id)
+    data = bytes(await f.download_as_bytearray())
+    if len(_RAW_CACHE) > 80:
+        _RAW_CACHE.clear()
+    _RAW_CACHE[file_id] = data
+    return data
+
+
+def draw_decor(img: Image.Image, idx: int, n: int) -> Image.Image:
+    """فلش‌های چپ/راست روی لبه‌ها + نقطه‌های نشانگر پایین عکس — دقیقاً مثل نمونه."""
+    base = img.convert("RGBA")
+    W, H = base.size
+    if n < 2:
+        return base.convert("RGB")
+
+    r = max(14, int(min(W, H) * 0.052))
+    cy = H // 2
+    margin = max(6, int(W * 0.018))
+
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+
+    # ---- فلش‌ها ----
+    for side in ("l", "r"):
+        cx = margin + r if side == "l" else W - margin - r
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(0, 0, 0, 115),
+                  outline=(255, 255, 255, 90), width=max(1, int(r * 0.06)))
+        h = r * 0.40
+        o = r * 0.26
+        if side == "l":
+            pts = [(cx + o, cy - h), (cx + o, cy + h), (cx - o * 1.7, cy)]
+        else:
+            pts = [(cx - o, cy - h), (cx - o, cy + h), (cx + o * 1.7, cy)]
+        d.polygon(pts, fill=(255, 255, 255, 245))
+
+    # ---- نقطه‌ها ----
+    dot_r = max(3, int(min(W, H) * 0.012))
+    gap = dot_r * 3.2
+    y = H - max(12, int(H * 0.055))
+    x0 = W / 2 - ((n - 1) * gap) / 2
+    span = ((n - 1) * gap) / 2 + dot_r * 2
+
+    # رنگ نقطه‌ها بر اساس روشنایی پس‌زمینه (روی هر عکسی دیده شود)
+    y0, y1 = int(max(0, y - dot_r * 3)), int(min(H, y + dot_r * 3))
+    xa, xb = int(max(0, W / 2 - span - 4)), int(min(W, W / 2 + span + 4))
+    sample = base.crop((xa, y0, xb, y1)).convert("L")
+    pixels = list(sample.getdata())
+    avg = (sum(pixels) / len(pixels)) if pixels else 128
+    light_bg = avg > 145
+    col_active = (0, 0, 0, 225) if light_bg else (255, 255, 255, 250)
+    col_idle = (0, 0, 0, 105) if light_bg else (255, 255, 255, 120)
+
+    for i in range(n):
+        x = x0 + i * gap
+        d.ellipse([x - dot_r, y - dot_r, x + dot_r, y + dot_r],
+                  fill=col_active if i == idx else col_idle)
+
+    return Image.alpha_composite(base, layer).convert("RGB")
+
+
+async def prepared_photo(context, file_id: str, idx: int, n: int):
+    """file_id عکس آماده را برمی‌گرداند؛ اگر نبود، عکس را می‌سازد و آپلود می‌کند."""
+    if n < 2:
+        return file_id  # تزئین لازم نیست
+    cache = context.bot_data.setdefault(RENDER_CACHE_KEY, {})
+    key = f"{file_id}|{idx}|{n}"
+    if key in cache:
+        return cache[key]
+    raw = await fetch_raw(context, file_id)
+    img = Image.open(io.BytesIO(raw))
+    out = draw_decor(img, idx, n)
+    bio = io.BytesIO()
+    out.save(bio, format="JPEG", quality=92)
+    bio.seek(0)
+    bio.name = "slide.jpg"
+    return ("file", bio, key)
 
 
 # ---------------------------------------------------------------- نمایش اسلاید
@@ -175,23 +371,31 @@ def slide_caption(d: dict, idx: int):
 
 
 async def render_slide(context, cid: int, chat_id: int, message_id: int) -> bool:
-    """همان پیام را به اسلاید جاری تغییر می‌دهد (بدون ارسال پیام جدید)."""
+    """همان پیام را به اسلاید جاری تغییر می‌دهد (فلش و نقطه روی عکس کشیده می‌شود)."""
     d = store(context).get(cid)
     if not d or not d["photos"]:
         return False
     idx = d["idx"]
     n = len(d["photos"])
+    cap = slide_caption(d, idx)
+    prepared = await prepared_photo(context, d["photos"][idx], idx, n)
+
+    if isinstance(prepared, str):
+        media = InputMediaPhoto(media=prepared, caption=cap)
+    else:
+        _, bio, _ = prepared
+        media = InputMediaPhoto(media=bio, caption=cap)
+
     try:
-        await context.bot.edit_message_media(
+        msg = await context.bot.edit_message_media(
             chat_id=chat_id,
             message_id=message_id,
-            media=InputMediaPhoto(media=d["photos"][idx], caption=slide_caption(d, idx)),
+            media=media,
             reply_markup=carousel_kb(cid, idx, n),
         )
-        return True
     except BadRequest as e:
-        msg = str(e).lower()
-        if "not modified" in msg or "unchange" in msg:
+        m = str(e).lower()
+        if "not modified" in m or "unchange" in m:
             try:
                 await context.bot.edit_message_reply_markup(
                     chat_id=chat_id, message_id=message_id,
@@ -203,24 +407,35 @@ async def render_slide(context, cid: int, chat_id: int, message_id: int) -> bool
         logger.warning("render_slide failed: %s", e)
         return False
 
+    # ذخیره file_id عکس آماده برای دفعات بعد (بدون آپلود مجدد)
+    if not isinstance(prepared, str) and getattr(msg, "photo", None):
+        context.bot_data.setdefault(RENDER_CACHE_KEY, {})[prepared[2]] = msg.photo[-1].file_id
+    return True
+
 
 async def send_carousel(context, chat_id, photos, captions) -> bool:
     """یک کاروسل تازه می‌فرستد و پیامش را ثبت می‌کند."""
     cid = create_carousel(context, photos, captions)
     d = store(context)[cid]
+    n = len(d["photos"])
+    prepared = await prepared_photo(context, d["photos"][0], 0, n)
+    photo = prepared if isinstance(prepared, str) else prepared[1]
     try:
         msg = await context.bot.send_photo(
             chat_id=chat_id,
-            photo=d["photos"][0],
+            photo=photo,
             caption=slide_caption(d, 0),
-            reply_markup=carousel_kb(cid, 0, len(d["photos"])),
+            reply_markup=carousel_kb(cid, 0, n),
         )
     except Exception as e:
         logger.exception("send_carousel failed: %s", e)
         store(context).pop(cid, None)
         return False
+    if not isinstance(prepared, str) and getattr(msg, "photo", None):
+        context.bot_data.setdefault(RENDER_CACHE_KEY, {})[prepared[2]] = msg.photo[-1].file_id
     d["chat_id"] = msg.chat_id
     d["message_id"] = msg.message_id
+    save_state(context)
     return True
 
 
@@ -316,6 +531,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         d["photos"].append(file_id)
         d["captions"].append(cap)
         d["idx"] = len(d["photos"]) - 1
+        save_state(context)
         await render_slide(context, cid, d["chat_id"], d["message_id"])
         return
 
@@ -385,6 +601,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         while len(d["captions"]) <= idx:
             d["captions"].append("")
         d["captions"][idx] = text[:MAX_CAPTION]
+        save_state(context)
         try:
             await context.bot.edit_message_caption(
                 chat_id=d["chat_id"],
@@ -513,6 +730,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await ack(query, "فقط یک اسلاید داری.")
             return
         d["idx"] = (d["idx"] - 1) % n if act == "p" else (d["idx"] + 1) % n
+        save_state(context)
         await render_slide(context, cid, chat_id, message_id)
         await ack(query)
         return
@@ -526,12 +744,31 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if 0 <= target < n:
             d["idx"] = target
+            save_state(context)
             await render_slide(context, cid, chat_id, message_id)
         await ack(query)
         return
 
     if act == "info":
         await ack(query, f"اسلاید {d['idx'] + 1} از {n}")
+        return
+
+    # منوی گزینه‌ها
+    if act == "menu":
+        await ack(query)
+        await query.message.reply_text(
+            f"⚙️ <b>گزینه‌های کاروسل</b> — اسلاید {d['idx'] + 1} از {n}",
+            parse_mode="HTML",
+            reply_markup=menu_kb(cid, d["idx"], n),
+        )
+        return
+
+    if act == "close":
+        await ack(query)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
         return
 
     # کپشن این اسلاید
@@ -577,6 +814,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if i < len(d["captions"]):
             d["captions"].pop(i)
         d["idx"] = min(i, len(d["photos"]) - 1)
+        save_state(context)
         await render_slide(context, cid, chat_id, message_id)
         await ack(query, "➖ اسلاید حذف شد.")
         return
@@ -591,6 +829,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         store(context).pop(cid, None)
+        save_state(context)
         await ack(query, "🗑 پاک شد.")
         return
 
@@ -623,7 +862,12 @@ async def error_handler(update, context):
 
 
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
