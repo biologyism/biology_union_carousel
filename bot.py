@@ -231,6 +231,8 @@ def get_session(context: ContextTypes.DEFAULT_TYPE) -> dict:
             "state": "idle",   # idle | collecting | awaiting_text
             "cid": None,
             "pending": None,   # {"action": "add"|"cap"|"pub", "cid": int}
+            "status_chat_id": None,   # پیام وضعیتی که ویرایش می‌شود
+            "status_message_id": None,
         }
     return context.user_data["session"]
 
@@ -241,6 +243,31 @@ def reset_session(s: dict):
     s["state"] = "collecting"
     s["cid"] = None
     s["pending"] = None
+    s["status_chat_id"] = None
+    s["status_message_id"] = None
+
+
+async def update_status(context, chat_id: int, text: str, kb=None):
+    """یک پیام وضعیت ثابت که با هر عکس ویرایش می‌شود (نه پیام جدید)."""
+    s = get_session(context)
+    mid = s.get("status_message_id")
+    if mid and s.get("status_chat_id") == chat_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=mid, text=text, reply_markup=kb
+            )
+            return
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return
+        except Exception:
+            pass
+    try:
+        msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)
+        s["status_chat_id"] = chat_id
+        s["status_message_id"] = msg.message_id
+    except Exception as e:
+        logger.warning("update_status failed: %s", e)
 
 
 # ---------------------------------------------------------------- کیبوردها
@@ -251,7 +278,7 @@ def collect_kb(s: dict) -> InlineKeyboardMarkup:
     if n:
         rows.append([InlineKeyboardButton(f"🎬 ساخت کاروسل ({n} عکس)", callback_data="build")])
         rows.append([
-            InlineKeyboardButton("✏️ کپشن همه اسلایدها", callback_data="cap_all"),
+            InlineKeyboardButton("✏️ کپشن کاروسل", callback_data="cap_all"),
             InlineKeyboardButton("🗑 حذف آخرین عکس", callback_data="rm_last"),
         ])
         rows.append([InlineKeyboardButton("🖼 ارسال به صورت آلبوم", callback_data="send_album")])
@@ -273,9 +300,8 @@ def carousel_kb(cid: int, idx: int, n: int, mode: str = "media") -> InlineKeyboa
 
 
 def menu_kb(cid: int, idx: int, n: int, mode: str = "media") -> InlineKeyboardMarkup:
-    cap_label = "✏️ کپشن کاروسل" if mode == "rich" else f"✏️ کپشن اسلاید {idx + 1}"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(cap_label, callback_data=f"c|{cid}|cap")],
+        [InlineKeyboardButton("✏️ کپشن کاروسل", callback_data=f"c|{cid}|cap")],
         [
             InlineKeyboardButton("➕ عکس", callback_data=f"c|{cid}|add"),
             InlineKeyboardButton("➖ حذف این اسلاید", callback_data=f"c|{cid}|rem"),
@@ -662,20 +688,26 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         s["state"] = "collecting"
 
     if len(s["photos"]) >= MAX_PHOTOS:
-        await update.message.reply_text(
+        await update_status(
+            context, update.effective_chat.id,
             f"⚠️ به حداکثر {MAX_PHOTOS} عکس رسیدی. روی «🎬 ساخت کاروسل» بزن.",
-            reply_markup=collect_kb(s),
+            collect_kb(s),
         )
         return
 
     s["photos"].append(file_id)
     s["captions"].append(cap)
     n = len(s["photos"])
-    await update.message.reply_text(
-        f"📸 عکس {n} دریافت شد."
-        + ("\n📝 کپشنش ذخیره شد." if cap else "")
-        + "\n\nعکس بعدی رو بفرست یا روی «🎬 ساخت کاروسل» بزن:",
-        reply_markup=collect_kb(s),
+    if cap:
+        # کپشنی که همراه عکس آمده، کپشن کل کاروسل می‌شود
+        s["captions"] = [cap] * n
+    await update_status(
+        context,
+        update.effective_chat.id,
+        f"📸 <b>{n}</b> عکس ذخیره شد."
+        + ("  |  📝 کپشن ثبت شد" if cap else "")
+        + "\n\nعکس بعدی رو بفرست، یا روی «🎬 ساخت کاروسل» بزن:",
+        collect_kb(s),
     )
 
 
@@ -706,9 +738,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "cap_all":
         s["captions"] = [text[:MAX_CAPTION]] * len(s["photos"])
         s["state"] = "collecting"
-        await update.message.reply_text(
-            "✅ کپشن برای همه اسلایدها ثبت شد:\n\n" + (text or "(خالی)"),
-            reply_markup=collect_kb(s),
+        await update_status(
+            context, update.effective_chat.id,
+            f"📸 <b>{len(s['photos'])}</b> عکس  |  📝 کپشن: {text or '(خالی)'}\n\n"
+            "عکس بعدی رو بفرست، یا روی «🎬 ساخت کاروسل» بزن:",
+            collect_kb(s),
         )
         return
 
@@ -719,35 +753,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- کپشن یک اسلاید ---
     if action == "cap":
-        while len(d["captions"]) < len(d["photos"]):
-            d["captions"].append("")
-
-        if d.get("mode") == "rich":
-            # در حالت نیتیو، کپشن برای کل کاروسل است
-            d["captions"] = [text[:MAX_CAPTION]] * len(d["photos"])
-            save_state(context)
-            ok = await refresh_carousel(context, cid)
-            await update.message.reply_text(
-                "✅ کپشن کاروسل ذخیره شد." if ok else "⚠️ ذخیره شد ولی به‌روزرسانی پیام نشد."
-            )
-            return
-
-        idx = d["idx"]
-        while len(d["captions"]) <= idx:
-            d["captions"].append("")
-        d["captions"][idx] = text[:MAX_CAPTION]
+        # یک کپشن واحد برای کل کاروسل
+        d["captions"] = [text[:MAX_CAPTION]] * len(d["photos"])
         save_state(context)
-        try:
-            await context.bot.edit_message_caption(
-                chat_id=d["chat_id"],
-                message_id=d["message_id"],
-                caption=text[:MAX_CAPTION] if text else "",
-                reply_markup=carousel_kb(cid, idx, len(d["photos"]), d.get("mode", "media")),
-            )
-        except Exception as e:
-            logger.warning("edit caption failed: %s", e)
-            await render_slide(context, cid, d["chat_id"], d["message_id"])
-        await update.message.reply_text(f"✅ کپشن اسلاید {idx + 1} ذخیره شد.")
+        ok = await refresh_carousel(context, cid)
+        await update.message.reply_text(
+            "✅ کپشن کاروسل ذخیره شد." if ok else "✅ ذخیره شد (برای دیدنش پیام را دوباره باز کن)."
+        )
         return
 
     # --- انتشار ---
@@ -799,6 +811,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 s["captions"] = []
                 s["state"] = "idle"
                 s["pending"] = None
+                s["status_message_id"] = None
+                s["status_chat_id"] = None
             else:
                 await ack(query, "❌ ساخت کاروسل ناموفق بود.", True)
             return
@@ -913,12 +927,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         s["pending"] = {"action": "cap", "cid": cid}
         s["state"] = "awaiting_text"
-        cur = d["captions"][d["idx"]] if d["idx"] < len(d["captions"]) else ""
+        cur = next((c for c in d["captions"] if c and c.strip()), "")
         await ack(query)
         await query.message.reply_text(
-            f"✏️ کپشن اسلاید {d['idx'] + 1} رو بفرست:\n\n"
+            "✏️ کپشن کاروسل رو بفرست (یک متن برای کل کاروسل):\n\n"
             f"متن فعلی: {cur or '(خالی)'}\n\n"
-            "برای خالی کردن کپشن، یک نقطه (. ) بفرست.",
+            "برای خالی کردن کپشن، یک نقطه (.) بفرست.",
         )
         return
 
