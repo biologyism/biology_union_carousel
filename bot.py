@@ -26,8 +26,11 @@ import asyncio
 import io
 import json
 import os
+import re
 import logging
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
@@ -78,6 +81,14 @@ logger = logging.getLogger("carousel-bot")
 
 MAX_PHOTOS = 10
 MAX_CAPTION = 1024  # محدودیت کپشن عکس در تلگرام
+
+# ---------------- کاروسل نیتیو تلگرام (Rich Messages) ----------------
+# Bot API 10.1+ متد sendRichMessage را دارد و بلوک «slideshow» آن
+# دقیقاً همان کاروسل با فلش ◀ ▶ و نقطه‌های پایین است که تلگرام خودش رندر می‌کند.
+# auto = اول تلاش می‌کند نیتیو بفرستد، اگر نشد حالت دکمه‌ای | off = فقط حالت دکمه‌ای
+RICH_MODE = os.getenv("RICH_CAROUSEL", "auto").strip().lower()
+API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}/"
+RTL_RE = re.compile(r"[\u0600-\u06FF]")
 
 
 # ---------------------------------------------------------------- ابزارها
@@ -248,8 +259,10 @@ def collect_kb(s: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def carousel_kb(cid: int, idx: int, n: int) -> InlineKeyboardMarkup:
-    """فقط یک ردیف باریک — فلش‌ها و نقطه‌ها روی خود عکس کشیده شده‌اند."""
+def carousel_kb(cid: int, idx: int, n: int, mode: str = "media") -> InlineKeyboardMarkup:
+    """در حالت نیتیو فقط ⚙️؛ در حالت جایگزین ردیف باریک ◀ ⚙️ ▶."""
+    if mode == "rich":
+        return InlineKeyboardMarkup([[InlineKeyboardButton("⚙️", callback_data=f"c|{cid}|menu")]])
     row = []
     if n > 1:
         row.append(InlineKeyboardButton("◀️", callback_data=f"c|{cid}|p"))
@@ -259,9 +272,10 @@ def carousel_kb(cid: int, idx: int, n: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([row])
 
 
-def menu_kb(cid: int, idx: int, n: int) -> InlineKeyboardMarkup:
+def menu_kb(cid: int, idx: int, n: int, mode: str = "media") -> InlineKeyboardMarkup:
+    cap_label = "✏️ کپشن کاروسل" if mode == "rich" else f"✏️ کپشن اسلاید {idx + 1}"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"✏️ کپشن اسلاید {idx + 1}", callback_data=f"c|{cid}|cap")],
+        [InlineKeyboardButton(cap_label, callback_data=f"c|{cid}|cap")],
         [
             InlineKeyboardButton("➕ عکس", callback_data=f"c|{cid}|add"),
             InlineKeyboardButton("➖ حذف این اسلاید", callback_data=f"c|{cid}|rem"),
@@ -270,6 +284,91 @@ def menu_kb(cid: int, idx: int, n: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🗑 پاک کردن کاروسل", callback_data=f"c|{cid}|del")],
         [InlineKeyboardButton("✖️ بستن", callback_data=f"c|{cid}|close")],
     ])
+
+
+# ---------------------------------------------------------------- کاروسل نیتیو
+
+def _api_sync(method: str, payload: dict) -> dict:
+    """فراخوانی مستقیم Bot API (برای متدهایی که کتابخانه هنوز ندارد)."""
+    req = urllib.request.Request(
+        API_BASE + method,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            body = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            body = json.loads(raw)
+        except Exception:
+            raise RuntimeError(f"HTTP {e.code}: {raw[:200]}")
+    if not body.get("ok"):
+        raise RuntimeError(body.get("description") or str(body)[:200])
+    return body.get("result") or {}
+
+
+async def tg_api(method: str, payload: dict) -> dict:
+    return await asyncio.to_thread(_api_sync, method, payload)
+
+
+def carousel_caption(d: dict) -> str:
+    """کپشن مشترک کاروسل = اولین کپشن غیرخالی."""
+    for c in d.get("captions", []):
+        if c and c.strip():
+            return c.strip()[:MAX_CAPTION]
+    return ""
+
+
+def build_rich_message(photos, caption: str) -> dict:
+    """{"blocks":[{"type":"slideshow","blocks":[{photo},...]}]}"""
+    slides = [
+        {"type": "photo", "photo": {"type": "photo", "media": fid}}
+        for fid in photos
+    ]
+    block = {"type": "slideshow", "blocks": slides}
+    if caption:
+        block["caption"] = {"text": caption}
+    rich = {"blocks": [block]}
+    if RTL_RE.search(caption or ""):
+        rich["is_rtl"] = True
+    return rich
+
+
+def rich_menu_markup(cid: int) -> dict:
+    return {"inline_keyboard": [[{"text": "⚙️", "callback_data": f"c|{cid}|menu"}]]}
+
+
+async def refresh_carousel(context, cid: int) -> bool:
+    """بازسازی کامل پیام کاروسل پس از هر تغییر (کپشن/افزودن/حذف)."""
+    d = store(context).get(cid)
+    if not d or not d.get("photos"):
+        return False
+    if d.get("mode") == "rich":
+        n = len(d["photos"])
+        if n < 2:
+            # تک‌عکس: کاروسل معنا ندارد → پیام را با عکس معمولی عوض کن
+            try:
+                await context.bot.delete_message(chat_id=d["chat_id"], message_id=d["message_id"])
+            except Exception:
+                pass
+            return await send_carousel(context, d["chat_id"], d["photos"], d["captions"])
+        payload = {
+            "chat_id": d["chat_id"],
+            "message_id": d["message_id"],
+            "rich_message": build_rich_message(d["photos"], carousel_caption(d)),
+            "reply_markup": rich_menu_markup(cid),
+        }
+        try:
+            await tg_api("editMessageText", payload)
+            save_state(context)
+            return True
+        except Exception as e:
+            logger.warning("editMessageText(rich) failed: %s", e)
+            return False
+    return await render_slide(context, cid, d["chat_id"], d["message_id"])
 
 
 # ---------------------------------------------------------------- پردازش عکس
@@ -413,11 +512,34 @@ async def render_slide(context, cid: int, chat_id: int, message_id: int) -> bool
     return True
 
 
-async def send_carousel(context, chat_id, photos, captions) -> bool:
-    """یک کاروسل تازه می‌فرستد و پیامش را ثبت می‌کند."""
+async def send_carousel(context, chat_id, photos, captions, with_menu: bool = True) -> bool:
+    """کاروسل می‌فرستد: ترجیحاً نیتیو تلگرام (rich slideshow)، وگرنه حالت دکمه‌ای."""
     cid = create_carousel(context, photos, captions)
     d = store(context)[cid]
     n = len(d["photos"])
+    caption = carousel_caption(d)
+
+    # ---- ۱) تلاش برای کاروسل نیتیو ----
+    if RICH_MODE != "off" and n >= 2:
+        payload = {
+            "chat_id": chat_id,
+            "rich_message": build_rich_message(d["photos"], caption),
+        }
+        if with_menu:
+            payload["reply_markup"] = rich_menu_markup(cid)
+        try:
+            res = await tg_api("sendRichMessage", payload)
+            d["mode"] = "rich"
+            d["chat_id"] = (res.get("chat") or {}).get("id", chat_id)
+            d["message_id"] = res.get("message_id")
+            save_state(context)
+            logger.info("✅ کاروسل نیتیو تلگرام ارسال شد (message_id=%s)", d["message_id"])
+            return True
+        except Exception as e:
+            logger.warning("sendRichMessage ناموفق بود → حالت دکمه‌ای. دلیل: %s", e)
+
+    # ---- ۲) حالت جایگزین: یک عکس با دکمه‌ها ----
+    d["mode"] = "media"
     prepared = await prepared_photo(context, d["photos"][0], 0, n)
     photo = prepared if isinstance(prepared, str) else prepared[1]
     try:
@@ -425,7 +547,7 @@ async def send_carousel(context, chat_id, photos, captions) -> bool:
             chat_id=chat_id,
             photo=photo,
             caption=slide_caption(d, 0),
-            reply_markup=carousel_kb(cid, 0, n),
+            reply_markup=carousel_kb(cid, 0, n, d["mode"]) if with_menu else None,
         )
     except Exception as e:
         logger.exception("send_carousel failed: %s", e)
@@ -465,8 +587,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 سلام! من <b>کاروسل‌ساز</b> هستم.\n\n"
         "📸 تا <b>۱۰ عکس</b> برام بفرست.\n"
         "بعد روی دکمه <b>«🎬 ساخت کاروسل»</b> بزن.\n\n"
-        "نتیجه یک <b>پیام اسلایدی</b> می‌شه: با دکمه‌های ◀️ ▶️ بین عکس‌ها می‌چرخی، "
-        "نقطه‌های پایین هم نشون می‌دن کجایی — بدون اینکه پیام جدیدی فرستاده بشه.\n\n"
+        "نتیجه یک <b>کاروسل نیتیو تلگرام</b> می‌شه: فلش‌های ◀ ▶ روی لبه‌ها و "
+        "نقطه‌های پایین — با انگشت یا موس ورق می‌خوره، درست مثل نمونه‌ای که دیدی.\n\n"
         "بعدش می‌تونی کپشن هر اسلاید رو عوض کنی یا کل کاروسل رو <b>بدون دیده شدن نامت</b> "
         "توی کانال/گروه منتشر کنی.\n\n"
         "👇 عکس اول رو بفرست:",
@@ -480,7 +602,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ <b>چطور کار می‌کنه؟</b>\n\n"
         "1️⃣ عکس‌ها رو بفرست (تا ۱۰ تا)\n"
         "2️⃣ دکمه «🎬 ساخت کاروسل» رو بزن\n"
-        "3️⃣ با ◀️ و ▶️ بین اسلایدها بچرخ\n"
+        "3️⃣ خود تلگرام کاروسل رو می‌سازه — با فلش و نقطه ورق می‌خوره\n"
         "4️⃣ «✏️ کپشن این اسلاید» برای نوشتن متن روی همون عکس\n"
         "5️⃣ «📤 انتشار» برای فرستادن به کانال یا گروه (بدون نام تو)\n\n"
         "دستورها:\n"
@@ -532,7 +654,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         d["captions"].append(cap)
         d["idx"] = len(d["photos"]) - 1
         save_state(context)
-        await render_slide(context, cid, d["chat_id"], d["message_id"])
+        await refresh_carousel(context, cid)
         return
 
     # --- جمع‌آوری عکس ---
@@ -597,6 +719,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- کپشن یک اسلاید ---
     if action == "cap":
+        while len(d["captions"]) < len(d["photos"]):
+            d["captions"].append("")
+
+        if d.get("mode") == "rich":
+            # در حالت نیتیو، کپشن برای کل کاروسل است
+            d["captions"] = [text[:MAX_CAPTION]] * len(d["photos"])
+            save_state(context)
+            ok = await refresh_carousel(context, cid)
+            await update.message.reply_text(
+                "✅ کپشن کاروسل ذخیره شد." if ok else "⚠️ ذخیره شد ولی به‌روزرسانی پیام نشد."
+            )
+            return
+
         idx = d["idx"]
         while len(d["captions"]) <= idx:
             d["captions"].append("")
@@ -607,7 +742,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=d["chat_id"],
                 message_id=d["message_id"],
                 caption=text[:MAX_CAPTION] if text else "",
-                reply_markup=carousel_kb(cid, idx, len(d["photos"])),
+                reply_markup=carousel_kb(cid, idx, len(d["photos"]), d.get("mode", "media")),
             )
         except Exception as e:
             logger.warning("edit caption failed: %s", e)
@@ -622,7 +757,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dest_id = int(dest)
         except ValueError:
             dest_id = dest  # مثل @mychannel
-        ok = await send_carousel(context, dest_id, d["photos"], d["captions"])
+        ok = await send_carousel(context, dest_id, d["photos"], d["captions"], with_menu=False)
         if ok:
             await update.message.reply_text(
                 "✅ کاروسل منتشر شد!\n"
@@ -759,7 +894,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             f"⚙️ <b>گزینه‌های کاروسل</b> — اسلاید {d['idx'] + 1} از {n}",
             parse_mode="HTML",
-            reply_markup=menu_kb(cid, d["idx"], n),
+            reply_markup=menu_kb(cid, d["idx"], n, d.get("mode", "media")),
         )
         return
 
@@ -815,7 +950,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             d["captions"].pop(i)
         d["idx"] = min(i, len(d["photos"]) - 1)
         save_state(context)
-        await render_slide(context, cid, chat_id, message_id)
+        if d.get("mode") == "rich" and len(d["photos"]) < 2:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception:
+                pass
+            store(context).pop(cid, None)
+            await ack(query, "➖ حذف شد. برای ادامه یک کاروسل جدید بساز.")
+            return
+        await refresh_carousel(context, cid)
         await ack(query, "➖ اسلاید حذف شد.")
         return
 

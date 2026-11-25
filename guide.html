@@ -3,248 +3,250 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>راهنمای ساده ربات کاروسل اسلایدی</title>
+<title>راهنمای ساده — ربات کاروسل</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Tahoma, Arial, sans-serif; background:#f0f4f8; color:#1a202c; line-height:1.9; padding:20px 14px 50px; }
-  .wrap { max-width: 780px; margin: 0 auto; }
-  .hero { background: linear-gradient(135deg,#229ED9,#0088cc); color:#fff; border-radius:18px; padding:30px 22px; text-align:center; margin-bottom:22px; box-shadow:0 8px 24px rgba(0,136,204,.25); }
-  .hero .emoji { font-size:52px; display:block; margin-bottom:8px; }
-  .hero h1 { font-size:26px; margin-bottom:8px; }
-  .hero p { font-size:15px; opacity:.95; }
-  .overview { background:#fff; border-radius:14px; padding:18px 20px; margin-bottom:22px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
-  .overview h2 { font-size:17px; margin-bottom:12px; color:#0088cc; }
-  .steps-mini { display:flex; flex-wrap:wrap; gap:8px; }
-  .steps-mini span { background:#e8f4fc; color:#0077b6; border-radius:999px; padding:5px 13px; font-size:13px; font-weight:bold; }
-  .card { background:#fff; border-radius:16px; padding:24px 22px; margin-bottom:20px; box-shadow:0 2px 10px rgba(0,0,0,.06); border-top:5px solid #229ED9; }
-  .card.green{border-top-color:#22c55e;} .card.orange{border-top-color:#f59e0b;}
-  .card.purple{border-top-color:#8b5cf6;} .card.pink{border-top-color:#ec4899;}
-  .card-head { display:flex; align-items:center; gap:13px; margin-bottom:16px; }
-  .num { flex-shrink:0; width:46px; height:46px; border-radius:50%; background:#229ED9; color:#fff; font-size:22px; font-weight:bold; display:flex; align-items:center; justify-content:center; }
-  .green .num{background:#22c55e;} .orange .num{background:#f59e0b;} .purple .num{background:#8b5cf6;} .pink .num{background:#ec4899;}
-  .card-head h2 { font-size:20px; }
-  .card p { font-size:15px; margin-bottom:10px; }
-  .card ul, .card ol { padding-right:22px; font-size:15px; margin-bottom:10px; }
-  .card li { margin-bottom:7px; }
-  .tip { background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:11px 14px; font-size:14px; margin:12px 0; }
-  .tip b { color:#92400e; }
-  .warn { background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:11px 14px; font-size:14px; margin:12px 0; }
-  .warn b { color:#991b1b; }
-  .ok { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:11px 14px; font-size:14px; margin:12px 0; }
-  .ok b { color:#166534; }
-  code, .ltr { direction:ltr; display:inline-block; background:#eef2f7; border-radius:6px; padding:1px 8px; font-family:Consolas,monospace; font-size:13.5px; color:#0f4c75; }
-  pre { direction:ltr; text-align:left; background:#1e293b; color:#e2e8f0; border-radius:10px; padding:14px 16px; font-size:13px; overflow-x:auto; margin:10px 0; line-height:1.7; }
-  pre code { background:none; color:inherit; padding:0; }
-  .checklist { list-style:none; padding-right:0 !important; }
-  .checklist li { background:#f8fafc; border-radius:10px; padding:10px 14px; margin-bottom:8px; }
-  .faq { margin-bottom:10px; }
-  .faq summary { cursor:pointer; font-weight:bold; font-size:15px; background:#f1f5f9; border-radius:10px; padding:11px 14px; }
-  .faq p { padding:10px 14px; font-size:14px; color:#475569; }
-  .footer { text-align:center; color:#94a3b8; font-size:13px; margin-top:26px; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Tahoma,Arial,sans-serif;background:#eef3f8;color:#16202b;line-height:2;padding:18px 12px 60px}
+  .wrap{max-width:720px;margin:0 auto}
 
-  /* ---- نمای شبیه‌سازی کاروسل ---- */
-  .mock { background:#17212b; border-radius:14px; padding:16px; margin:14px 0; }
-  .mock .slide {
-    position:relative; background:linear-gradient(160deg,#e8f1f5,#cfe3ec); border-radius:10px 10px 0 0;
-    height:190px; display:flex; align-items:center; justify-content:center; color:#4a6b7c; font-size:15px; font-weight:bold;
-  }
-  .mock .arrow { position:absolute; top:50%; transform:translateY(-50%); width:34px; height:34px; border-radius:50%;
-    background:rgba(0,0,0,.45); color:#fff; display:flex; align-items:center; justify-content:center; font-size:15px; }
-  .mock .arrow.r { right:8px; } .mock .arrow.l { left:8px; }
-  .mock .kb { background:#17212b; padding:6px 0 0; }
-  .mock .krow { display:flex; gap:4px; margin-bottom:4px; }
-  .mock .kbtn { flex:1; background:#232e3c; color:#e3e9ef; border-radius:6px; padding:7px 2px; text-align:center; font-size:12px; }
-  .mock .kbtn.dots { background:transparent; color:#8ea3b8; font-size:13px; }
-  .mock .dots { position:absolute; bottom:9px; left:0; right:0; display:flex; justify-content:center; gap:7px; }
-  .mock .dot { width:7px; height:7px; border-radius:50%; background:rgba(0,0,0,.18); display:block; }
-  .mock .dot.on { background:rgba(0,0,0,.8); }
-  .mock .cap { color:#c8d6e2; font-size:13px; padding:6px 4px 2px; }
-  .mock .meta { color:#7b8fa3; font-size:11px; text-align:left; direction:ltr; padding:4px 4px 0; }
+  .top{background:linear-gradient(140deg,#2196d4,#0b76b8);color:#fff;border-radius:20px;padding:32px 22px;text-align:center;margin-bottom:24px}
+  .top .e{font-size:56px;display:block;line-height:1}
+  .top h1{font-size:25px;margin:10px 0 6px}
+  .top p{font-size:14.5px;opacity:.95}
 
-  @media (max-width:560px) { .hero h1{font-size:21px;} .card{padding:20px 16px;} }
+  .n{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;
+     background:#0b76b8;color:#fff;font-size:21px;font-weight:bold;flex:0 0 auto}
+
+  .step{background:#fff;border-radius:16px;padding:22px 20px;margin-bottom:18px;box-shadow:0 2px 12px rgba(16,40,70,.07)}
+  .head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .head h2{font-size:19px}
+  .step p{font-size:15px;margin-bottom:10px}
+  .step ol,.step ul{padding-right:20px;font-size:15px;margin-bottom:8px}
+  .step li{margin-bottom:8px}
+  .step b{color:#0b5f95}
+
+  .do{background:#f2f8fd;border-right:4px solid #2196d4;border-radius:8px;padding:10px 14px;font-size:14.5px;margin:10px 0}
+  .good{background:#f0fbf3;border-right:4px solid #27a457;border-radius:8px;padding:10px 14px;font-size:14px;margin:10px 0}
+  .bad{background:#fef4f4;border-right:4px solid #e05252;border-radius:8px;padding:10px 14px;font-size:14px;margin:10px 0}
+  .good b{color:#1c7a41} .bad b{color:#a52a2a}
+
+  code{direction:ltr;display:inline-block;background:#e9eff5;border-radius:5px;padding:1px 7px;font-family:Consolas,monospace;font-size:13.5px;color:#0b4f7a}
+  .path{direction:ltr;display:block;background:#20303f;color:#d7e4ee;border-radius:9px;padding:11px 14px;font-family:Consolas,monospace;font-size:13.5px;margin:9px 0;text-align:left;overflow-x:auto}
+
+  /* نمای کاروسل */
+  .mock{background:#17212b;border-radius:14px;padding:14px;margin:14px 0}
+  .slide{position:relative;background:linear-gradient(160deg,#e9f1f5,#d3e5ee);border-radius:10px;height:170px;
+         display:flex;align-items:center;justify-content:center;color:#5b7a8c;font-weight:bold;font-size:15px}
+  .arw{position:absolute;top:50%;transform:translateY(-50%);width:32px;height:32px;border-radius:50%;
+       background:rgba(0,0,0,.45);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .arw.l{left:8px} .arw.r{right:8px}
+  .dots{position:absolute;bottom:9px;left:0;right:0;display:flex;justify-content:center;gap:7px}
+  .dot{width:7px;height:7px;border-radius:50%;background:rgba(0,0,0,.2)}
+  .dot.on{background:rgba(0,0,0,.8)}
+  .krow{display:flex;gap:4px;margin-top:6px}
+  .kbtn{flex:1;background:#232e3c;color:#e6edf3;border-radius:6px;padding:7px 2px;text-align:center;font-size:12px}
+
+  .done{background:#0b76b8;color:#fff;border-radius:12px;padding:16px 20px;text-align:center;font-size:16px;font-weight:bold}
+  .faq{background:#fff;border-radius:14px;padding:6px 18px 16px;margin-bottom:16px;box-shadow:0 2px 12px rgba(16,40,70,.07)}
+  .faq h2{font-size:18px;padding:14px 0 8px}
+  details{border-bottom:1px solid #eef2f6;padding:4px 0}
+  details:last-child{border:none}
+  summary{cursor:pointer;font-weight:bold;font-size:14.5px;padding:11px 2px}
+  details p{font-size:14px;color:#42535f;padding:2px 2px 10px}
+  .foot{text-align:center;color:#9aabb8;font-size:13px;margin-top:26px}
+  @media(max-width:520px){.top h1{font-size:20px}.step{padding:18px 15px}}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <div class="hero">
-    <span class="emoji">🎠</span>
-    <h1>راهنمای ربات کاروسل اسلایدی</h1>
-    <p>هر کاروسل = یک پیام که با ◀ ▶ عکسش عوض می‌شه</p>
+  <div class="top">
+    <span class="e">🎠</span>
+    <h1>راهنمای ساده ربات کاروسل</h1>
+    <p>۸ قدم — هر قدم رو انجام بده، آخرش ربات کار می‌کنه</p>
   </div>
 
-  <!-- نمای کاروسل -->
-  <div class="card">
-    <div class="card-head"><div class="num">🎯</div><h2>ربات چه چیزی می‌سازه؟</h2></div>
-    <p>یک <b>پیام واحد</b>. فلش‌های ◀ ▶ روی <b>خود لبه‌های عکس</b> و نقطه‌ها <b>پایین عکس</b> — دقیقاً مثل نمونه‌ای که فرستادی:</p>
+  <!-- ۰ -->
+  <div class="step">
+    <div class="head"><span class="n">۰</span><h2>چی داری و چی لازم داری</h2></div>
+    <p>فقط یک فایل لازم داری: <b>carousel-bot-final.zip</b></p>
+    <p>و یک چیز دیگه: باید از قبل یک ربات در تلگرام ساخته باشی و <b>توکنش</b> رو داشته باشی (قدم ۴ توضیح می‌ده).</p>
+    <div class="good"><b>ربات چی می‌سازه؟</b> یک <b>کاروسل نیتیو تلگرام</b> — فلش‌ها و نقطه‌ها رو خودِ تلگرام می‌سازه:</div>
     <div class="mock">
-      <div class="slide">
-        عکس اسلاید ۲
-        <div class="arrow l">◀</div>
-        <div class="arrow r">▶</div>
-        <div class="dots">
-          <span class="dot"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span>
-        </div>
+      <div class="slide">عکس اسلاید ۲
+        <div class="arw l">◀</div><div class="arw r">▶</div>
+        <div class="dots"><span class="dot"></span><span class="dot on"></span><span class="dot"></span><span class="dot"></span></div>
       </div>
-      <div class="kb">
-        <div class="krow">
-          <div class="kbtn">◀️</div>
-          <div class="kbtn" style="flex:.7">⚙️</div>
-          <div class="kbtn">▶️</div>
-        </div>
-      </div>
-      <div class="meta">11:00 PM</div>
+      <div class="krow"><div class="kbtn">⚙️</div></div>
     </div>
-    <div class="ok">✅ زیر عکس فقط یک ردیف باریک دکمه هست. بقیه کارها (کپشن، افزودن عکس، انتشار) داخل دکمه <b>⚙️</b> پنهان شده.</div>
-    <div class="tip">💡 چرا فلش‌ها هم روی عکس هستن هم زیرش؟ چون تلگرام اجازه نمی‌ده دکمه <b>روی</b> عکس باشه. فلش‌های روی عکس تصویری‌اند (برای زیبایی) و فلش‌های زیرش دکمه‌های واقعی‌اند.</div>
   </div>
 
-  <!-- همیشگی -->
-  <div class="card green">
-    <div class="card-head"><div class="num">♾</div><h2>کاروسل‌ها دیگه منقضی نمی‌شن</h2></div>
-    <p>قبلاً با هر ری‌استارت ربات، دکمه‌های کاروسل‌های قدیمی از کار می‌افتادن. حالا ربات لیست کاروسل‌ها رو توی فایل
-      <code>state.json</code> نگه می‌داره و <b>هر ۹۰ ثانیه</b> اون رو توی همون ریپو ذخیره می‌کنه.</p>
+  <!-- کاروسل نیتیو -->
+  <div class="card">
+    <div class="head"><span class="n">🎠</span><h2>این قابلیت از کجا می‌آد؟</h2></div>
+    <p>تلگرام از تابستان ۲۰۲۶ قابلیت <b>Rich Messages</b> رو اضافه کرده که یک بلوک به اسم <b>slideshow</b> داره — یعنی اسلایدشوی نیتیو داخل پیام.</p>
     <ul>
-      <li>✅ کاروسل هفته پیش هم امروز با ◀ ▶ کار می‌کنه</li>
-      <li>✅ اگه ربات قطع و وصل بشه، چیزی از دست نمی‌ره</li>
-      <li>✅ خودکار انجام می‌شه — کاری لازم نیست بکنی</li>
+      <li>فلش‌های ◀ ▶ و نقطه‌های پایین رو <b>خود تلگرام</b> می‌کشه — نه ربات</li>
+      <li>با انگشت (گوشی) یا موس (کامپیوتر) ورق می‌خوره</li>
+      <li>توی کانال هم همین‌طوری نشون داده می‌شه</li>
+      <li>ربات با متد <code>sendRichMessage</code> اون رو می‌فرسته</li>
     </ul>
-    <div class="tip">💡 توی ریپو کامیت‌هایی با پیام <code>chore: state [skip ci]</code> می‌بینی — این‌ها همون ذخیره‌های خودکارن. کاملاً عادیه.</div>
-    <div class="warn">⚠️ برای فعال شدنش کافیه کل پوشه رو یک‌جا آپلود کنی — کارت بعدی.</div>
+    <div class="good"><b>نکته:</b> اگه گوشی یا تلگرام یکی از اعضا قدیمی باشه و این قابلیت رو نشون نده، ربات خودکار به حالت دکمه‌ای (◀ ⚙️ ▶) برمی‌گرده تا همیشه کار کنه.</div>
   </div>
 
-  <!-- آپدیت -->
-  <div class="card pink">
-    <div class="card-head"><div class="num">📦</div><h2>قدم ۱: آپلود یک‌جا (کل پوشه)</h2></div>
-    <p>لازم نیست فایل‌به‌فایل کاری کنی. یک zip داری که <b>همه‌چیز</b> توش هست:</p>
+  <!-- ۱ -->
+  <div class="step">
+    <div class="head"><span class="n">۱</span><h2>فایل zip رو باز کن</h2></div>
     <ol>
-      <li>فایل zip رو دانلود و <b>Extract</b> کن</li>
-      <li>پوشه رو باز کن و <b>Ctrl + A</b> بزن (همه انتخاب بشن)</li>
-      <li>برو به ریپو: <code>biologyism/biology_union_carousel</code></li>
-      <li><b>Add file ← Upload files</b></li>
-      <li>همه فایل‌ها رو بکش و بنداز توی صفحه</li>
-      <li><b>Commit changes</b></li>
+      <li>فایل <b>carousel-bot-final.zip</b> رو دانلود کن</li>
+      <li>راست‌کلیک → <b>Extract All</b> → <b>Extract</b></li>
+      <li>حالا یک پوشه داری که ۱۰ فایل توش هست</li>
     </ol>
-    <div class="ok">✅ با همین یک آپلود، هم نسخه‌ی اسلایدی جدید نصب می‌شه، هم ذخیره‌سازی دائمی، هم ورک‌فلوی اجرای خودکار.</div>
-    <div class="warn">⚠️ پوشه <code>.github</code> هم باید آپلود بشه، وگرنه ربات اجرا نمی‌شه. اگه ویندوز مخفیش کرده: <b>View ← Hidden items</b>.</div>
-    <div class="tip">💡 فایل‌های هم‌نام (مثل <code>bot.py</code> و <code>main.yml</code>) خودکار جایگزین می‌شن — لازم نیست اول پاکشون کنی.</div>
+    <div class="good"><b>درست شد اگه:</b> داخل پوشه فایل‌هایی مثل <code>bot.py</code>، <code>START-HERE.txt</code> و یک پوشه به اسم <code>.github</code> می‌بینی.</div>
+    <div class="bad"><b>پوشه .github رو نمی‌بینی؟</b> توی فولدر ویندوز برو: <b>View ← Hidden items</b> رو تیک بزن.</div>
   </div>
 
-  <!-- تنظیمات گیت‌هاب -->
-  <div class="card purple">
-    <div class="card-head"><div class="num">🔑</div><h2>قدم ۲: دو تنظیم در گیت‌هاب</h2></div>
-
-    <p><b>الف) اجازه‌ی نوشتن</b> — بدون این، کاروسل‌ها ذخیره نمی‌شن:</p>
+  <!-- ۲ -->
+  <div class="step">
+    <div class="head"><span class="n">۲</span><h2>همه فایل‌ها رو روی گیت‌هاب آپلود کن</h2></div>
     <ol>
-      <li><b>Settings</b> → <b>Actions</b> → <b>General</b></li>
-      <li>برو پایین صفحه تا <b>Workflow permissions</b></li>
-      <li><b>Read and write permissions</b> رو انتخاب کن</li>
-      <li><b>Save</b></li>
+      <li>برو به ریپوت:<span class="path">github.com/biologyism/biology_union_carousel</span></li>
+      <li>دکمه <b>Add file</b> (بالای صفحه) → <b>Upload files</b></li>
+      <li>داخل پوشه‌ای که Extract کردی برو و <b>Ctrl + A</b> بزن (همه انتخاب بشن)</li>
+      <li>همه رو با موس بکش و بنداز توی صفحه گیت‌هاب</li>
+      <li>صبر کن آپلود تموم بشه، بعد پایین صفحه <b>Commit changes</b> رو بزن</li>
     </ol>
+    <div class="good"><b>درست شد اگه:</b> بعد از Commit، فایل‌های <code>bot.py</code> و <code>START-HERE.txt</code> رو توی لیست فایل‌های ریپو می‌بینی.</div>
+    <div class="do">💡 فایل‌های هم‌نام خودشون جایگزین می‌شن — لازم نیست اول پاکشون کنی.</div>
+  </div>
 
-    <p style="margin-top:16px"><b>ب) توکن ربات</b> (اگه قبلاً ساختی، رد شو):</p>
+  <!-- ۳ -->
+  <div class="step">
+    <div class="head"><span class="n">۳</span><h2>به گیت‌هاب اجازه بده ذخیره کنه</h2></div>
+    <p>بدون این قدم، ربات کار می‌کنه ولی کاروسل‌های قبلی بعد از چند ساعت از کار می‌افتن.</p>
+    <ol>
+      <li>بالای ریپو: <b>Settings</b></li>
+      <li>منوی سمت چپ: <b>Actions</b> → <b>General</b></li>
+      <li>برو <b>پایین</b> صفحه تا بخش <b>Workflow permissions</b></li>
+      <li>گزینه <b>Read and write permissions</b> رو انتخاب کن</li>
+      <li>دکمه <b>Save</b></li>
+    </ol>
+    <div class="good"><b>درست شد اگه:</b> دایره‌ی کنار «Read and write permissions» پر شده و Save رو زدی.</div>
+  </div>
+
+  <!-- ۴ -->
+  <div class="step">
+    <div class="head"><span class="n">۴</span><h2>توکن ربات رو بذار</h2></div>
+    <p><b>اگه قبلاً این کار رو کردی، این قدم رو رد کن.</b></p>
+    <p>اول توکن رو بگیر:</p>
+    <ol>
+      <li>تلگرام → <b>@BotFather</b> → <code>/newbot</code></li>
+      <li>اسم و یوزرنیم (آخره یوزرنیم باید <code>bot</code> باشه)</li>
+      <li>یک متن مثل <code>123456:AAE...</code> می‌ده = <b>توکن</b></li>
+    </ol>
+    <p>حالا بذارش توی گیت‌هاب:</p>
     <ol>
       <li><b>Settings</b> → <b>Secrets and variables</b> → <b>Actions</b></li>
       <li><b>New repository secret</b></li>
-      <li>Name: <code>BOT_TOKEN</code> — Secret: توکن BotFather</li>
+      <li>Name: <code>BOT_TOKEN</code></li>
+      <li>Secret: توکنی که کپی کردی</li>
+      <li><b>Add secret</b></li>
     </ol>
-    <div class="warn">⚠️ <code>ALLOWED_USER_ID</code> رو خالی بذار تا همه اعضای گروه بتونن استفاده کنن.</div>
+    <div class="bad"><b>توکن رو به هیچ‌کس نده.</b> مثل رمز عبور رباته.</div>
   </div>
 
-  <!-- استفاده -->
-  <div class="card orange">
-    <div class="card-head"><div class="num">▶</div><h2>چطور استفاده کنم؟</h2></div>
+  <!-- ۵ -->
+  <div class="step">
+    <div class="head"><span class="n">۵</span><h2>ربات رو روشن کن</h2></div>
     <ol>
-      <li>توی چت با ربات (یا توی گروه) بنویس: <code>/start</code></li>
-      <li>عکس‌هاش رو <b>یکی‌یکی</b> بفرست (تا ۱۰ تا) 📸</li>
-      <li>روی <b>«🎬 ساخت کاروسل»</b> بزن</li>
-      <li>حالا با <b>◀️ ▶️</b> بین اسلایدها بچرخ 🎉</li>
+      <li>بالای ریپو: تب <b>Actions</b></li>
+      <li>اگه پیامی اومد، <b>I understand my workflows, go ahead</b> رو بزن</li>
+      <li>از سمت چپ <b>Run Carousel Bot</b> رو انتخاب کن</li>
+      <li>دکمه <b>Run workflow</b> (سمت راست) → دوباره <b>Run workflow</b> سبز</li>
+      <li>۱ تا ۲ دقیقه صبر کن</li>
     </ol>
-    <p>بعد از ساخت، این‌ها رو داری:</p>
-    <ul>
-      <li><b>◀️ ▶️</b> — ورق زدن اسلایدها (نقطه‌های روی عکس نشون می‌دن کجایی)</li>
-      <li><b>⚙️</b> — منوی گزینه‌ها، شامل:</li>
-      <li style="list-style:none;margin-right:18px">✏️ <b>کپشن این اسلاید</b> — متن روی همین عکس</li>
-      <li style="list-style:none;margin-right:18px">➕ <b>عکس</b> — اسلاید جدید</li>
-      <li style="list-style:none;margin-right:18px">➖ <b>حذف این اسلاید</b></li>
-      <li style="list-style:none;margin-right:18px">📤 <b>انتشار</b> — فرستادن به کانال/گروه <b>بدون دیده شدن نامت</b></li>
-      <li style="list-style:none;margin-right:18px">🗑 <b>پاک کردن</b> — حذف کل کاروسل</li>
-    </ul>
+    <div class="good"><b>درست شد اگه:</b> کنار اجرا یک تیک <b>سبز ✅</b> می‌بینی. اگه زرد (در حال اجرا) بود یعنی هنوز داره بالا میاد.</div>
+    <div class="bad"><b>قرمز ❌ شد؟</b> یعنی توکن اشتباهه — برگرد به قدم ۴.</div>
+
+    <p style="margin-top:16px"><b>⚠️ خیلی مهم — فقط یک اجرا باید فعال باشه:</b></p>
+    <p>اگه توی لیست Actions چند تا <b>زرد (In progress)</b> دیدی، یعنی چند نسخه از ربات همزمان روشن شدن و با هم دعوا می‌کنن. باید همه رو به‌جز <b>آخری</b> لغو کنی:</p>
+    <ol>
+      <li>روی هر اجرای قدیمی کلیک کن</li>
+      <li>بالا سمت راست: <b>Cancel workflow</b></li>
+      <li>این کار رو برای همه‌ی اجراهای قدیمی تکرار کن</li>
+      <li>فقط جدیدترین اجرا بمونه</li>
+    </ol>
+    <div class="bad"><b>چرا؟</b> هر اجرای اضافه هم سهمیه‌ی گیت‌هابت رو مصرف می‌کنه، هم باعث می‌شه ربات قطع و وصل بشه.</div>
   </div>
 
-  <!-- گروه -->
-  <div class="card purple">
-    <div class="card-head"><div class="num">👥</div><h2>توی گروه — همه بتونن استفاده کنن</h2></div>
-    <p>۳ کار لازمه:</p>
-    <p><b>الف) خاموش کردن Group Privacy:</b></p>
+  <!-- ۶ -->
+  <div class="step">
+    <div class="head"><span class="n">۶</span><h2>تست کن</h2></div>
     <ol>
-      <li>برو به <a href="https://t.me/BotFather" target="_blank">@BotFather</a></li>
-      <li><code>/mybots</code> → رباتت رو انتخاب کن</li>
-      <li><b>Bot Settings ← Group Privacy ← Turn off</b></li>
+      <li>توی تلگرام برو به رباتت (یوزرنیمش رو سرچ کن)</li>
+      <li>بفرست: <code>/start</code></li>
+      <li>چند عکس بفرست — <b>یکی‌یکی</b></li>
+      <li>دکمه <b>«🎬 ساخت کاروسل»</b> رو بزن</li>
+      <li>با انگشت یا فلش‌های روی عکس ورق بزن 🎉</li>
     </ol>
-    <div class="warn">⚠️ اگه این کار رو نکنی، ربات عکس‌هایی که بقیه توی گروه می‌فرستن رو نمی‌بینه.</div>
-    <p><b>ب) اضافه کردن ربات به گروه:</b></p>
+    <div class="do">💡 عکس‌ها رو آلبومی نفرست. توی آلبوم تلگرام فقط عکس اول به ربات می‌رسه.</div>
+    <div class="good"><b>درست شد اگه:</b> یک کاروسل دیدی که با فلش‌های ◀ ▶ روی لبه‌ها و نقطه‌های پایین ورق می‌خوره — دقیقاً همون نمونه‌ای که می‌خواستی.</div>
+  </div>
+
+  <!-- ۷ -->
+  <div class="step">
+    <div class="head"><span class="n">۷</span><h2>ربات رو به گروه اضافه کن</h2></div>
+    <p>تا <b>همه‌ی اعضای گروه</b> بتونن استفاده کنن، ۳ کار:</p>
+
+    <p><b>الف) حریم خصوصی رو خاموش کن:</b></p>
     <ol>
-      <li>تنظیمات گروه ← اعضا ← افزودن عضو ← یوزرنیم ربات</li>
+      <li>تلگرام → <b>@BotFather</b> → بفرست <code>/mybots</code></li>
+      <li>رباتت رو انتخاب کن</li>
+      <li><b>Bot Settings</b> → <b>Group Privacy</b></li>
+      <li><b>Turn off</b></li>
+    </ol>
+    <div class="bad"><b>مهم‌ترین قدمه!</b> اگه خاموشش نکنی، ربات عکس‌هایی که بقیه می‌فرستن رو نمی‌بینه.</div>
+
+    <p><b>ب) ربات رو به گروه اضافه کن:</b></p>
+    <ol>
+      <li>توی گروه: <b>اعضا ← افزودن عضو</b> ← یوزرنیم ربات</li>
       <li>ربات رو <b>ادمین</b> کن</li>
     </ol>
-    <p><b>ج) تست:</b> توی گروه <code>/start</code> بزن و چند عکس بفرست.</p>
-    <div class="ok">👥 هر عضو گروه <code>/start</code> می‌زنه و کاروسل خودش رو می‌سازه. همه کاروسل‌های ساخته‌شده رو می‌تونن ورق بزنن.</div>
+
+    <p><b>ج) تست:</b> توی گروه <code>/start</code> بزن و یک کاروسل بساز.</p>
+    <div class="good"><b>هر عضو</b> کاروسل خودش رو می‌سازه و همه می‌تونن ورقش بزنن.</div>
   </div>
 
-  <!-- انتشار -->
-  <div class="card green">
-    <div class="card-head"><div class="num">📤</div><h2>انتشار در کانال (بدون نام من)</h2></div>
+  <!-- ۸ -->
+  <div class="step">
+    <div class="head"><span class="n">۸</span><h2>انتشار در کانال (اختیاری)</h2></div>
     <ol>
-      <li>وقتی کاروسل آماده شد، دکمه <b>«📤 انتشار»</b> رو بزن</li>
-      <li>یوزرنیم کانال رو بفرست: <code>@mychannel</code><br>یا آیدی عددی: <code>-1001234567890</code></li>
-      <li>تمام! کاروسل توی کانال می‌ره و مردم با ◀ ▶ ورقش می‌زنن</li>
+      <li>وقتی کاروسل آماده شد، دکمه <b>⚙️</b> → <b>📤 انتشار</b></li>
+      <li>یوزرنیم کانال رو بفرست: <code>@mychannel</code></li>
+      <li>تمام — کاروسل توی کانال می‌ره و <b>اسم تو دیده نمی‌شه</b></li>
     </ol>
-    <div class="warn">⚠️ ربات باید در کانال/گروه مقصد <b>ادمین</b> باشه، وگرنه ارسال ناموفق می‌شه.</div>
-    <div class="tip">💡 فقط <b>یوزرنیم کانال‌های عمومی</b> کار می‌کنه. برای کانال خصوصی باید آیدی عددی (<code>-100...</code>) بدی.</div>
+    <div class="bad"><b>یادت باشه:</b> ربات باید توی کانال مقصد <b>ادمین</b> باشه.</div>
   </div>
 
-  <!-- چک‌لیست -->
-  <div class="card">
-    <div class="card-head"><div class="num">☑</div><h2>چک‌لیست</h2></div>
-    <ul class="checklist">
-      <li>☐ کل پوشه رو یک‌جا آپلود و Commit کردم (شامل <code>.github</code>)</li>
-      <li>☐ در Settings، «Read and write permissions» رو فعال کردم</li>
-      <li>☐ توی ریپو فایل <code>state.json</code> ساخته شده (یعنی ذخیره‌سازی کار می‌کنه)</li>
-      <li>☐ توی Actions علامت سبز ✅ هست</li>
-      <li>☐ توی چت خصوصی <code>/start</code> + چند عکس + «ساخت کاروسل» تست کردم</li>
-      <li>☐ Group Privacy خاموشه</li>
-      <li>☐ ربات توی گروه ادمین شده و جواب می‌ده</li>
-      <li>☐ انتشار در کانال تست شد</li>
-    </ul>
+  <div class="done">✅ تمومه! ربات حالا همیشه روشنه و کاروسل‌ها هم ذخیره می‌شن</div>
+
+  <div class="faq" style="margin-top:20px">
+    <h2>❓ اگه مشکلی پیش اومد</h2>
+    <details><summary>ربات جواب نمی‌ده</summary>
+      <p>برو Actions و ببین آخرین اجرا سبزه یا نه. اگه قرمز بود، توکن رو چک کن (قدم ۴). اگه سبزه، چند دقیقه صبر کن — گیت‌هاب هر ۵ ساعت ربات رو یک بار ری‌استارت می‌کنه و کمتر از ۱ دقیقه قطعیه.</p></details>
+    <details><summary>توی گروه جواب نمی‌ده</summary>
+      <p>Group Privacy رو خاموش نکردی. قدم ۷-الف رو انجام بده، بعد ربات رو از گروه حذف و دوباره اضافه کن.</p></details>
+    <details><summary>می‌گه «کاروسل منقضی شده»</summary>
+      <p>یعنی قدم ۳ (Read and write permissions) انجام نشده. انجامش بده و قدم ۵ رو دوباره اجرا کن.</p></details>
+    <details><summary>خطای قرمز: No module named PIL</summary>
+      <p>معمولاً خودش حل می‌شه. اگه موند، برو Actions → آخرین اجرا → Run workflow دوباره.</p></details>
+    <details><summary>توی ریپو کامیت‌های «chore: state» می‌بینم</summary>
+      <p>کاملاً عادیه — این‌ها ذخیره‌های خودکار خود رباتن تا کاروسل‌ها یادش بمونه. دستشون نزن.</p></details>
+    <details><summary>کاروسل با دکمه‌های ◀ ⚙️ ▶ اومد، نه با فلش‌های روی عکس</summary>
+      <p>یعنی تلگرامِ همون دستگاه از قابلیت نیتیو پشتیبانی نکرده و ربات رفته روی حالت جایگزین. تلگرام رو آپدیت کن و دوباره امتحان کن.</p></details>
   </div>
 
-  <!-- سوالات -->
-  <div class="card orange">
-    <div class="card-head"><div class="num">؟</div><h2>مشکلات رایج</h2></div>
-    <details class="faq">
-      <summary>دکمه‌ها کار نمی‌کنن / می‌گه «کاروسل منقضی شده»</summary>
-      <p>با نسخه‌ی جدید دیگه نباید پیش بیاد، چون کاروسل‌ها توی <code>state.json</code> ذخیره می‌شن. اگه باز هم دیدی، یعنی پوشه <code>.github</code> آپلود نشده یا <b>main.yml</b> قدیمیه. در بدترین حالت، عکس‌ها رو دوباره بفرست و یکی جدید بساز — پیام قبلی توی تلگرام پاک نمی‌شه.</p>
-    </details>
-    <details class="faq">
-      <summary>عکس عوض می‌شه ولی پیام جدید هم میاد</summary>
-      <p>این‌طبیعیه: پیام‌های «✅ ذخیره شد» جدا فرستاده می‌شن. فقط <b>خودِ کاروسل</b> در یک پیام می‌مونه.</p>
-    </details>
-    <details class="faq">
-      <summary>کپشن نمی‌شینه</summary>
-      <p>مطمئن شو بعد از زدن «✏️ کپشن این اسلاید» <b>متن رو به‌صورت پیام</b> فرستادی. کپشن هر اسلاید جداست.</p>
-    </details>
-    <details class="faq">
-      <summary>توی گروه جواب نمی‌ده</summary>
-      <p>۹۰٪ مواقع Group Privacy خاموش نشده. بعد از خاموش کردن، ربات رو از گروه حذف و دوباره اضافه کن.</p>
-    </details>
-    <details class="faq">
-      <summary>Actions قرمز شد ❌</summary>
-      <p>توکن اشتباهه. Settings ← Secrets and variables ← Actions ← <code>BOT_TOKEN</code> رو درست کن.</p>
-    </details>
-  </div>
-
-  <p class="footer">🎠 ربات کاروسل اسلایدی — موفق باشی!</p>
+  <p class="foot">🎠 ربات کاروسل — نسخه دائمی</p>
 </div>
 </body>
 </html>
