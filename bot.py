@@ -392,16 +392,30 @@ def carousel_caption(d: dict) -> str:
     return ""
 
 
-def build_rich_message(photos, caption: str) -> dict:
-    """{"blocks":[{"type":"slideshow","blocks":[{photo},...]}]}"""
+def build_rich_message(photos, caption: str, style: str = "block") -> dict:
+    """ساخت پیام rich.
+
+    style="block"   → متن کپشن به‌صورت بلوک متن معمولی زیر کاروسل
+                      (رنگ متن عادی است و در تم تاریک خوانا می‌ماند)
+    style="caption" → متن به‌عنوان کپشن خودِ اسلایدشو (رنگ کم‌رنگ تلگرام)
+    """
     slides = [
         {"type": "photo", "photo": {"type": "photo", "media": fid}}
         for fid in photos
     ]
-    block = {"type": "slideshow", "blocks": slides}
-    if caption:
-        block["caption"] = {"text": bidi_fix(caption)}
-    rich = {"blocks": [block]}
+    show = {"type": "slideshow", "blocks": slides}
+    text = bidi_fix(caption) if caption else ""
+
+    if style == "caption":
+        if text:
+            show["caption"] = {"text": text}
+        blocks = [show]
+    else:
+        blocks = [show]
+        if text:
+            blocks.append({"type": "paragraph", "text": text})
+
+    rich = {"blocks": blocks}
     if RTL_RE.search(caption or ""):
         rich["is_rtl"] = True
     return rich
@@ -464,7 +478,8 @@ async def refresh_carousel(context, cid: int) -> bool:
         payload = {
             "chat_id": d["chat_id"],
             "message_id": d["message_id"],
-            "rich_message": build_rich_message(d["photos"], carousel_caption(d)),
+            "rich_message": build_rich_message(
+                d["photos"], carousel_caption(d), d.get("caption_style", "block")),
             "reply_markup": rich_menu_markup(cid),
         }
         try:
@@ -627,22 +642,24 @@ async def send_carousel(context, chat_id, photos, captions, with_menu: bool = Tr
 
     # ---- ۱) تلاش برای کاروسل نیتیو ----
     if RICH_MODE != "off" and n >= 2:
-        payload = {
-            "chat_id": chat_id,
-            "rich_message": build_rich_message(d["photos"], caption),
-        }
-        if with_menu:
-            payload["reply_markup"] = rich_menu_markup(cid)
-        try:
-            res = await tg_api("sendRichMessage", payload)
-            d["mode"] = "rich"
-            d["chat_id"] = (res.get("chat") or {}).get("id", chat_id)
-            d["message_id"] = res.get("message_id")
-            save_state(context)
-            logger.info("✅ کاروسل نیتیو تلگرام ارسال شد (message_id=%s)", d["message_id"])
-            return True
-        except Exception as e:
-            logger.warning("sendRichMessage ناموفق بود → حالت دکمه‌ای. دلیل: %s", e)
+        for style in (["block", "caption"] if caption else ["block"]):
+            payload = {
+                "chat_id": chat_id,
+                "rich_message": build_rich_message(d["photos"], caption, style),
+            }
+            if with_menu:
+                payload["reply_markup"] = rich_menu_markup(cid)
+            try:
+                res = await tg_api("sendRichMessage", payload)
+                d["mode"] = "rich"
+                d["caption_style"] = style
+                d["chat_id"] = (res.get("chat") or {}).get("id", chat_id)
+                d["message_id"] = res.get("message_id")
+                save_state(context)
+                logger.info("✅ کاروسل نیتیو ارسال شد (%s, style=%s)", d["message_id"], style)
+                return True
+            except Exception as e:
+                logger.warning("sendRichMessage با style=%s نشد: %s", style, e)
 
     # ---- ۲) حالت جایگزین: یک عکس با دکمه‌ها ----
     d["mode"] = "media"
