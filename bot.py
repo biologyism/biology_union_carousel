@@ -29,8 +29,10 @@ import os
 import re
 import logging
 import subprocess
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
@@ -92,6 +94,7 @@ MAX_CAPTION = 1024  # محدودیت کپشن عکس در تلگرام
 RICH_MODE = os.getenv("RICH_CAROUSEL", "auto").strip().lower()
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 RTL_RE = re.compile(r"[\u0600-\u06FF]")
+FA_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 LRM = "\u200e"   # علامت چپ‌به‌راست
 RLM = "\u200f"   # علامت راست‌به‌چپ
 
@@ -174,6 +177,7 @@ def load_state(context: ContextTypes.DEFAULT_TYPE):
     context.bot_data["carousels"] = carousels
     context.bot_data["next_cid"] = int(raw.get("next_cid") or 1)
     context.bot_data["destinations"] = raw.get("destinations") or []
+    context.bot_data["scheduled"] = raw.get("scheduled") or []
     logger.info("✅ %d کاروسل از فایل state بازیابی شد", len(carousels))
 
 
@@ -187,6 +191,7 @@ def save_state(context: ContextTypes.DEFAULT_TYPE):
         "next_cid": context.bot_data.get("next_cid", 1),
         "carousels": {str(k): v for k, v in d.items()},
         "destinations": context.bot_data.get("destinations", []),
+        "scheduled": context.bot_data.get("scheduled", []),
     }
     try:
         path = Path(STATE_FILE)
@@ -235,7 +240,8 @@ async def persist_loop(app: Application):
     """هر چند ثانیه اگر تغییری بوده، state را در ریپو کامیت می‌کند."""
     while True:
         await asyncio.sleep(max(20, PERSIST_INTERVAL))
-        if STATE_PERSIST == "git":
+        app.create_task(scheduler_loop(app))
+    if STATE_PERSIST == "git":
             try:
                 await asyncio.to_thread(_git_push_state)
             except Exception as e:
@@ -244,6 +250,7 @@ async def persist_loop(app: Application):
 
 async def post_init(app: Application):
     load_state(app)
+    app.create_task(scheduler_loop(app))
     if STATE_PERSIST == "git":
         app.create_task(persist_loop(app))
         logger.info("💾 ذخیره‌سازی دائمی روی گیت فعال است")
@@ -275,6 +282,7 @@ def get_session(context: ContextTypes.DEFAULT_TYPE) -> dict:
             "state": "idle",   # idle | collecting | awaiting_text
             "cid": None,
             "pending": None,   # {"action": "add"|"cap"|"pub", "cid": int}
+            "sched_dest": None,
             "status_chat_id": None,   # پیام وضعیتی که ویرایش می‌شود
             "status_message_id": None,
         }
@@ -350,7 +358,8 @@ def menu_kb(cid: int, idx: int, n: int, mode: str = "media") -> InlineKeyboardMa
             InlineKeyboardButton("➕ عکس", callback_data=f"c|{cid}|add"),
             InlineKeyboardButton("➖ حذف این اسلاید", callback_data=f"c|{cid}|rem"),
         ],
-        [InlineKeyboardButton("📤 انتشار در کانال / گروه", callback_data=f"c|{cid}|pub")],
+        [InlineKeyboardButton("📤 انتشار فوری", callback_data=f"c|{cid}|pub")],
+        [InlineKeyboardButton("⏰ زمان‌بندی انتشار", callback_data=f"c|{cid}|sched")],
         [InlineKeyboardButton("🗑 پاک کردن کاروسل", callback_data=f"c|{cid}|del")],
         [InlineKeyboardButton("✖️ بستن", callback_data=f"c|{cid}|close")],
     ])
@@ -459,6 +468,110 @@ async def publish_carousel(context, cid: int, dest) -> tuple:
         remember_destination(context, dest_id, title)
         return True, title, None
     return False, title, "send failed"
+
+
+def parse_when(text: str):
+    """«14:30» یا «+30» یا «30» → زمان دقیق. None اگر نامعتبر بود."""
+    s = (text or "").translate(FA_DIGITS).strip().replace("：", ":").replace("٫", ":")
+    if not s:
+        return None
+    if s.startswith("+"):
+        s = s[1:].strip()
+    m = re.fullmatch(r"(\d{1,3})\s*(m|min|دقیقه|د)?", s)
+    if m and (s.endswith(("m", "د", "دقیقه")) or (len(s) <= 3 and int(m.group(1)) <= 600)):
+        minutes = int(m.group(1))
+        if 0 < minutes <= 600:
+            return time.time() + minutes * 60
+    m = re.fullmatch(r"(\d{1,2})[:.](\d{2})", s)
+    if m:
+        hh, mm = int(m.group(1)), int(m.group(2))
+        if 0 <= hh < 24 and 0 <= mm < 60:
+            now = datetime.now()
+            target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            return target.timestamp()
+    return None
+
+
+def fmt_when(ts: float) -> str:
+    return datetime.fromtimestamp(ts).strftime("%Y/%m/%d — %H:%M")
+
+
+def get_scheduled(app) -> list:
+    return app.bot_data.setdefault("scheduled", [])
+
+
+async def send_rich_photos(bot, chat_id, photos, caption: str) -> bool:
+    """ارسال کاروسل نیتیو بدون نیاز به context (برای زمان‌بند)."""
+    if len(photos) >= 2:
+        for style in (["block", "caption"] if caption else ["block"]):
+            try:
+                await tg_api("sendRichMessage", {
+                    "chat_id": chat_id,
+                    "rich_message": build_rich_message(photos, caption, style),
+                })
+                return True
+            except Exception as e:
+                logger.warning("scheduled sendRichMessage (%s) failed: %s", style, e)
+    try:
+        if len(photos) == 1:
+            await bot.send_photo(chat_id=chat_id, photo=photos[0], caption=caption or None)
+        else:
+            await bot.send_media_group(chat_id=chat_id, media=[
+                InputMediaPhoto(media=f, caption=(caption if i == 0 else None))
+                for i, f in enumerate(photos)
+            ])
+        return True
+    except Exception as e:
+        logger.warning("scheduled fallback failed: %s", e)
+        return False
+
+
+async def scheduler_loop(app):
+    """هر ۲۰ ثانیه پست‌های زمان‌بندی‌شده را بررسی می‌کند."""
+    while True:
+        try:
+            jobs = get_scheduled(app)
+            if jobs:
+                now = time.time()
+                due = [j for j in jobs if j.get("when", 0) <= now]
+                for job in due:
+                    ok = await send_rich_photos(
+                        app.bot, job["chat_id"], job["photos"], job.get("caption", ""))
+                    jobs.remove(job)
+                    save_state(app)
+                    try:
+                        await app.bot.send_message(
+                            chat_id=job["user_id"],
+                            text=(f"⏰ زمان انتشار رسید! کاروسل در <b>{job.get('title') or job['chat_id']}</b> "
+                                  + ("منتشر شد ✅" if ok else "منتشر نشد ❌ (ربات ادمین هست؟)")),
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning("scheduler loop error: %s", e)
+        await asyncio.sleep(20)
+
+
+def add_scheduled(context, cid: int, dest, when: float, user_id: int):
+    d = store(context).get(cid)
+    if not d:
+        return None
+    jobs = context.bot_data.setdefault("scheduled", [])
+    job = {
+        "id": int(time.time() * 1000) % 10_000_000,
+        "chat_id": dest,
+        "title": None,
+        "photos": list(d["photos"]),
+        "caption": carousel_caption(d),
+        "when": when,
+        "user_id": user_id,
+    }
+    jobs.append(job)
+    save_state(context)
+    return job
 
 
 async def refresh_carousel(context, cid: int) -> bool:
@@ -737,6 +850,19 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """اگر کسی دستور را اشتباه تایپ کرد، راهنمایی کن (فقط در چت خصوصی)."""
+    chat_type = update.effective_chat.type if update.effective_chat else "private"
+    if chat_type in ("group", "supergroup"):
+        return
+    await update.message.reply_text(
+        "🤔 این دستور رو نمی‌شناسم.\n\n"
+        "برای شروع بنویس:  /start\n"
+        "راهنما:  /help",
+        reply_markup=collect_kb(get_session(context)),
+    )
+
+
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = get_session(context)
     reset_session(s)
@@ -840,6 +966,43 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📸 <b>{len(s['photos'])}</b> عکس  |  📝 کپشن: {text or '(خالی)'}\n\n"
             "عکس بعدی رو بفرست، یا روی «🎬 ساخت کاروسل» بزن:",
             collect_kb(s),
+        )
+        return
+
+    # --- مقصد زمان‌بندی ---
+    if action == "sched_dest":
+        s["sched_dest"] = text
+        s["state"] = "idle"
+        await update.message.reply_text(
+            "⏰ کِی منتشر بشه؟",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("۳۰ دقیقه دیگه", callback_data=f"c|{cid}|st|30"),
+                 InlineKeyboardButton("۱ ساعت دیگه", callback_data=f"c|{cid}|st|60")],
+                [InlineKeyboardButton("۳ ساعت دیگه", callback_data=f"c|{cid}|st|180"),
+                 InlineKeyboardButton("۱ روز دیگه", callback_data=f"c|{cid}|st|1440")],
+                [InlineKeyboardButton("🕐 ساعت دلخواه (مثلاً 14:30)", callback_data=f"c|{cid}|stc")],
+            ]),
+        )
+        return
+
+    # --- ساعت دلخواه ---
+    if action == "sched_at":
+        when = parse_when(text)
+        if not when:
+            s["pending"] = {"action": "sched_at", "cid": cid}
+            await update.message.reply_text(
+                "❌ متوجه نشدم. این‌طوری بفرست:\n<code>14:30</code>  یا  <code>+45</code>",
+                parse_mode="HTML",
+            )
+            return
+        dest = s.get("sched_dest")
+        if not dest:
+            await update.message.reply_text("❌ مقصد انتخاب نشده. از منو دوباره شروع کن.")
+            return
+        add_scheduled(context, cid, dest, when, update.effective_user.id)
+        await update.message.reply_text(
+            f"⏰ ثبت شد! کاروسل در <b>{fmt_when(when)}</b> در <code>{dest}</code> منتشر می‌شه.",
+            parse_mode="HTML",
         )
         return
 
@@ -1140,6 +1303,82 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(ADMIN_HELP.format(dest=title or dest), parse_mode="HTML")
         return
 
+    # ---- زمان‌بندی: انتخاب مقصد ----
+    if act == "sched":
+        if not is_owner(update.effective_user.id):
+            await ack(query, "🔒 فقط مدیر ربات می‌تونه زمان‌بندی کنه.", True)
+            return
+        dests = get_destinations(context)
+        rows = [[InlineKeyboardButton(f"📤 {x['title']}", callback_data=f"c|{cid}|sd|{x['id']}")]
+                for x in dests]
+        rows.append([InlineKeyboardButton("➕ مقصد جدید", callback_data=f"c|{cid}|snew")])
+        await ack(query)
+        await query.message.reply_text(
+            "⏰ برای کدوم مقصد زمان‌بندی کنم؟" if dests else "⏰ اول مقصد رو بفرست:",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+        return
+
+    if act == "snew":
+        if not is_owner(update.effective_user.id):
+            await ack(query, "🔒 اجازه نداری.", True)
+            return
+        s["pending"] = {"action": "sched_dest", "cid": cid}
+        s["state"] = "awaiting_text"
+        await ack(query)
+        await query.message.reply_text(
+            "⏰ مقصد رو بفرست:\n<code>@my_channel</code> یا <code>-1001234567890</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    if act == "sd":
+        if not is_owner(update.effective_user.id):
+            await ack(query, "🔒 اجازه نداری.", True)
+            return
+        s["sched_dest"] = extra
+        await ack(query)
+        await query.message.reply_text(
+            "⏰ کِی منتشر بشه؟",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("۳۰ دقیقه دیگه", callback_data=f"c|{cid}|st|30"),
+                 InlineKeyboardButton("۱ ساعت دیگه", callback_data=f"c|{cid}|st|60")],
+                [InlineKeyboardButton("۳ ساعت دیگه", callback_data=f"c|{cid}|st|180"),
+                 InlineKeyboardButton("۱ روز دیگه", callback_data=f"c|{cid}|st|1440")],
+                [InlineKeyboardButton("🕐 ساعت دلخواه (مثلاً 14:30)", callback_data=f"c|{cid}|stc")],
+            ]),
+        )
+        return
+
+    if act in ("st", "stc"):
+        if not is_owner(update.effective_user.id):
+            await ack(query, "🔒 اجازه نداری.", True)
+            return
+        dest = s.get("sched_dest")
+        if not dest:
+            await ack(query, "اول مقصد رو انتخاب کن.", True)
+            return
+        await ack(query)
+        if act == "stc":
+            s["pending"] = {"action": "sched_at", "cid": cid}
+            await query.message.reply_text(
+                "🕐 ساعت رو بفرست — مثلاً:\n<code>14:30</code> یعنی امروز ساعت ۱۴:۳۰ "
+                "(اگه گذشته باشه، فردا)\n<code>+45</code> یعنی ۴۵ دقیقه دیگه",
+                parse_mode="HTML",
+            )
+            return
+        try:
+            minutes = int(extra)
+        except (TypeError, ValueError):
+            minutes = 30
+        when = time.time() + minutes * 60
+        add_scheduled(context, cid, dest, when, update.effective_user.id)
+        await query.message.reply_text(
+            f"⏰ ثبت شد! کاروسل در <b>{fmt_when(when)}</b> در <code>{dest}</code> منتشر می‌شه.",
+            parse_mode="HTML",
+        )
+        return
+
     if act == "newdest":
         if not is_owner(update.effective_user.id):
             await ack(query, "🔒 فقط مدیر ربات می‌تونه در کانال منتشر کنه.", True)
@@ -1178,6 +1417,8 @@ def main():
     app.add_handler(CommandHandler("new", start))
     app.add_handler(CommandHandler("carousel", start))
     app.add_handler(CommandHandler("cancel", cancel_cmd))
+    # ⚠️ باید بعد از همه‌ی CommandHandlerها باشد
+    app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
 
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
