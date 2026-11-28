@@ -59,6 +59,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 FORWARD_CHAT_ID = os.getenv("FORWARD_CHAT_ID", "").strip()
 # فقط این کاربر اجازه ساخت دارد (اختیاری) — برای گروه خالی بگذار
 ALLOWED_USER_ID = os.getenv("ALLOWED_USER_ID", "").strip()
+# 🔒 مالک ربات: فقط این کاربر می‌تواند «انتشار در کانال» و «حذف» انجام دهد.
+# برای گروه اکیداً پیشنهاد می‌شود این را پر کنی تا بقیه نتوانند در کانالت پست بگذارند.
+OWNER_ID = os.getenv("OWNER_ID", "").strip()
 
 # ---------------- ذخیره‌سازی دائمی ----------------
 # کاروسل‌ها در یک فایل JSON نگه داشته می‌شوند تا بعد از ری‌استارت هم زنده بمانند.
@@ -89,6 +92,38 @@ MAX_CAPTION = 1024  # محدودیت کپشن عکس در تلگرام
 RICH_MODE = os.getenv("RICH_CAROUSEL", "auto").strip().lower()
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 RTL_RE = re.compile(r"[\u0600-\u06FF]")
+LRM = "\u200e"   # علامت چپ‌به‌راست
+RLM = "\u200f"   # علامت راست‌به‌چپ
+
+
+def bidi_fix(text: str) -> str:
+    """فیلد کپشن فارسی + کلمات انگلیسی را مرتب می‌کند.
+
+    تلگرام برای متن دوزبانه، نقطه‌ویرگول و پرانتز را جابه‌جا می‌کند.
+    گذاشتن یک علامت نامرئی RTL در ابتدای هر خط این مشکل را حل می‌کند.
+    """
+    if not text:
+        return text
+    out = []
+    for line in text.split("\n"):
+        if not line.strip():
+            out.append(line)
+        elif RTL_RE.search(line):
+            out.append(RLM + line)
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+ADMIN_HELP = (
+    "❌ نشد در <b>{dest}</b> منتشر کنم.\n\n"
+    "تلگرام اجازه نمی‌ده ربات در کانالی که ادمین نیست پیام بذاره. "
+    "این کار <b>فقط یک بار</b> لازمه:\n\n"
+    "1️⃣ کانال رو باز کن → اسم کانال (بالا) → <b>Manage Channel</b>\n"
+    "2️⃣ <b>Administrators</b> → <b>Add Administrator</b>\n"
+    "3️⃣ یوزرنیم ربات رو سرچ کن و انتخابش کن\n"
+    "4️⃣ فقط گزینه <b>Post Messages</b> کافیه → <b>Save</b>\n\n"
+    "بعدش دوباره «📤 انتشار» رو بزن — از این به بعد با یک کلیک می‌ره."
+)
 
 
 # ---------------------------------------------------------------- ابزارها
@@ -97,6 +132,13 @@ def is_allowed(user_id: int) -> bool:
     if not ALLOWED_USER_ID:
         return True
     return str(user_id) == ALLOWED_USER_ID
+
+
+def is_owner(user_id: int) -> bool:
+    """انتشار در کانال و حذف فقط برای مالک (اگر OWNER_ID تنظیم شده باشد)."""
+    if not OWNER_ID:
+        return True
+    return str(user_id) == OWNER_ID
 
 
 async def ack(query, text: str = None, alert: bool = False):
@@ -131,6 +173,7 @@ def load_state(context: ContextTypes.DEFAULT_TYPE):
             continue
     context.bot_data["carousels"] = carousels
     context.bot_data["next_cid"] = int(raw.get("next_cid") or 1)
+    context.bot_data["destinations"] = raw.get("destinations") or []
     logger.info("✅ %d کاروسل از فایل state بازیابی شد", len(carousels))
 
 
@@ -143,6 +186,7 @@ def save_state(context: ContextTypes.DEFAULT_TYPE):
     payload = {
         "next_cid": context.bot_data.get("next_cid", 1),
         "carousels": {str(k): v for k, v in d.items()},
+        "destinations": context.bot_data.get("destinations", []),
     }
     try:
         path = Path(STATE_FILE)
@@ -356,7 +400,7 @@ def build_rich_message(photos, caption: str) -> dict:
     ]
     block = {"type": "slideshow", "blocks": slides}
     if caption:
-        block["caption"] = {"text": caption}
+        block["caption"] = {"text": bidi_fix(caption)}
     rich = {"blocks": [block]}
     if RTL_RE.search(caption or ""):
         rich["is_rtl"] = True
@@ -365,6 +409,42 @@ def build_rich_message(photos, caption: str) -> dict:
 
 def rich_menu_markup(cid: int) -> dict:
     return {"inline_keyboard": [[{"text": "⚙️", "callback_data": f"c|{cid}|menu"}]]}
+
+
+def get_destinations(context) -> list:
+    return context.bot_data.setdefault("destinations", [])
+
+
+def remember_destination(context, chat_id, title: str):
+    lst = get_destinations(context)
+    lst[:] = [x for x in lst if str(x.get("id")) != str(chat_id)]
+    lst.insert(0, {"id": chat_id, "title": title or str(chat_id)})
+    del lst[5:]
+    save_state(context)
+
+
+async def publish_carousel(context, cid: int, dest) -> tuple:
+    """ارسال کاروسل به مقصد. (موفق؟, عنوان مقصد, متن خطا)"""
+    d = store(context).get(cid)
+    if not d:
+        return False, None, "کاروسل پیدا نشد."
+    try:
+        dest_id = int(dest)
+    except (TypeError, ValueError):
+        dest_id = str(dest).strip()
+
+    title = None
+    try:
+        chat = await context.bot.get_chat(dest_id)
+        title = getattr(chat, "title", None) or getattr(chat, "username", None)
+    except Exception:
+        pass
+
+    ok = await send_carousel(context, dest_id, d["photos"], d["captions"], with_menu=False)
+    if ok:
+        remember_destination(context, dest_id, title)
+        return True, title, None
+    return False, title, "send failed"
 
 
 async def refresh_carousel(context, cid: int) -> bool:
@@ -491,7 +571,7 @@ async def prepared_photo(context, file_id: str, idx: int, n: int):
 def slide_caption(d: dict, idx: int):
     caps = d["captions"]
     if idx < len(caps) and caps[idx].strip():
-        return caps[idx][:MAX_CAPTION]
+        return bidi_fix(caps[idx][:MAX_CAPTION])
     return None
 
 
@@ -764,24 +844,20 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- انتشار ---
     if action == "pub":
+        if not is_owner(update.effective_user.id):
+            await update.message.reply_text("🔒 فقط مدیر ربات می‌تونه در کانال منتشر کنه.")
+            return
         dest = text
-        try:
-            dest_id = int(dest)
-        except ValueError:
-            dest_id = dest  # مثل @mychannel
-        ok = await send_carousel(context, dest_id, d["photos"], d["captions"], with_menu=False)
+        ok, title, _ = await publish_carousel(context, cid, dest)
         if ok:
             await update.message.reply_text(
-                "✅ کاروسل منتشر شد!\n"
-                "🤫 نام تو دیده نمی‌شه — پیام از طرف رباته و همه می‌تونن با ◀ ▶ ورقش بزنن."
-            )
-        else:
-            await update.message.reply_text(
-                "❌ انتشار انجام نشد.\n"
-                "مطمئن شو ربات در کانال/گروه مقصد <b>ادمین</b> هست و اجازه ارسال عکس داره.\n"
-                "دوباره مقصد رو بفرست (مثل @mychannel یا -1001234567890):",
+                f"✅ کاروسل در <b>{title or dest}</b> منتشر شد!\n"
+                "🤫 نام تو دیده نمی‌شه.\n"
+                "💾 مقصد ذخیره شد — دفعه بعد با یک کلیک می‌ره.",
                 parse_mode="HTML",
             )
+        else:
+            await update.message.reply_text(ADMIN_HELP.format(dest=title or dest), parse_mode="HTML")
         return
 
 
@@ -857,10 +933,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ---------- دکمه‌های کاروسل ----------
+    extra = None
     try:
-        _, sid, act = data.split("|", 2)
-        cid = int(sid)
-    except ValueError:
+        parts = data.split("|", 3)
+        cid = int(parts[1])
+        act = parts[2]
+        if len(parts) > 3:
+            extra = parts[3]
+    except (ValueError, IndexError):
         await ack(query)
         return
 
@@ -981,6 +1061,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_allowed(update.effective_user.id):
             await ack(query, "⛔ اجازه نداری.", True)
             return
+        if not is_owner(update.effective_user.id):
+            await ack(query, "🔒 فقط مدیر ربات می‌تونه کاروسل رو پاک کنه.", True)
+            return
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
         except Exception:
@@ -995,16 +1078,63 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_allowed(update.effective_user.id):
             await ack(query, "⛔ اجازه نداری.", True)
             return
+        if not is_owner(update.effective_user.id):
+            await ack(query, "🔒 فقط مدیر ربات می‌تونه در کانال منتشر کنه.", True)
+            return
+        dests = get_destinations(context)
+        rows = []
+        if FORWARD_CHAT_ID:
+            rows.append([InlineKeyboardButton(
+                "📤 ارسال به کانال پیش‌فرض", callback_data=f"c|{cid}|topub|{FORWARD_CHAT_ID}")])
+        for x in dests:
+            rows.append([InlineKeyboardButton(
+                f"📤 {x['title']}", callback_data=f"c|{cid}|topub|{x['id']}")])
+        rows.append([InlineKeyboardButton("➕ مقصد جدید", callback_data=f"c|{cid}|newdest")])
+        await ack(query)
+        await query.message.reply_text(
+            "📤 کجا منتشر بشه؟" if rows[:-1] else "📤 مقصد انتشار رو بفرست:",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+        return
+
+    # ارسال سریع به مقصد ذخیره‌شده
+    if act == "topub":
+        if not is_allowed(update.effective_user.id):
+            await ack(query, "⛔ اجازه نداری.", True)
+            return
+        if not is_owner(update.effective_user.id):
+            await ack(query, "🔒 فقط مدیر ربات می‌تونه در کانال منتشر کنه.", True)
+            return
+        await ack(query, "⏳ در حال ارسال…")
+        dest = extra
+        notes = await query.message.reply_text(f"⏳ دارم به {dest} می‌فرستم…")
+        ok, title, _ = await publish_carousel(context, cid, dest)
+        try:
+            await notes.delete()
+        except Exception:
+            pass
+        if ok:
+            await query.message.reply_text(
+                f"✅ منتشر شد در <b>{title or dest}</b>\n"
+                "🤫 نام تو دیده نمی‌شه — پیام از طرف کانال/رباته.",
+                parse_mode="HTML",
+            )
+        else:
+            await query.message.reply_text(ADMIN_HELP.format(dest=title or dest), parse_mode="HTML")
+        return
+
+    if act == "newdest":
+        if not is_owner(update.effective_user.id):
+            await ack(query, "🔒 فقط مدیر ربات می‌تونه در کانال منتشر کنه.", True)
+            return
         s["pending"] = {"action": "pub", "cid": cid}
         s["state"] = "awaiting_text"
         await ack(query)
-        hint = f"\n\nپیشنهاد: {FORWARD_CHAT_ID}" if FORWARD_CHAT_ID else ""
         await query.message.reply_text(
-            "📤 مقصد انتشار رو بفرست:\n"
+            "📤 مقصد رو بفرست:\n"
             "• یوزرنیم کانال: <code>@mychannel</code>\n"
-            "• یا آیدی عددی: <code>-1001234567890</code>"
-            + hint
-            + "\n\n⚠️ ربات باید در مقصد <b>ادمین</b> باشه.",
+            "• یا آیدی عددی: <code>-1001234567890</code>\n\n"
+            "⚠️ ربات باید در مقصد <b>ادمین</b> باشه (فقط یک بار).",
             parse_mode="HTML",
         )
         return
